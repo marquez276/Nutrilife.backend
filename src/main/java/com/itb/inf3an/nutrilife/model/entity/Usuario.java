@@ -40,7 +40,7 @@ public class Usuario {
 
     @NotBlank(message = "E-mail é obrigatório")
     @Email(message = "E-mail inválido")
-    @Column(length = 45, nullable = false, unique = true)
+    @Column(length = 100, nullable = false, unique = true)
     private String email;
 
     @Column(length = 20)

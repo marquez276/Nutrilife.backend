@@ -24,4 +24,12 @@ public class PlanoAlimentarController {
         log.info("Plano id={} retornado para usuarioId={}", plano.getId(), usuarioId);
         return plano;
     }
+
+    @PostMapping("/regenerar/{usuarioId}")
+    public PlanoAlimentar regenerarPlano(@PathVariable Long usuarioId) {
+        log.info("Regenerando plano (forçado) para usuarioId={}", usuarioId);
+        PlanoAlimentar plano = service.regenerarPlano(usuarioId);
+        log.info("Novo plano id={} gerado para usuarioId={}", plano.getId(), usuarioId);
+        return plano;
+    }
 }

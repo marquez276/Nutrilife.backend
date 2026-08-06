@@ -46,10 +46,21 @@ public class UsuarioController {
         if (usuarioRepository.findByEmail(nutricionista.getEmail()) != null) {
             return ResponseEntity.badRequest().body(Map.of("message", "E-mail já cadastrado."));
         }
+        if (nutricionista.getCrn() == null || nutricionista.getCrn().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "CRN é obrigatório."));
+        }
+        if (nutricionista.getEspecialidade() == null || nutricionista.getEspecialidade().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Especialidade é obrigatória."));
+        }
+        // Verifica duplicidade de CRN
+        if (usuarioRepository.findByTipoUsuario(com.itb.inf3an.nutrilife.model.enums.TipoUsuario.NUTRICIONISTA)
+                .stream().anyMatch(u -> nutricionista.getCrn().equalsIgnoreCase(u.getCrn()))) {
+            return ResponseEntity.badRequest().body(Map.of("message", "CRN já cadastrado no sistema."));
+        }
         nutricionista.setSenha(encoder.encode(nutricionista.getSenha()));
-        nutricionista.setCodStatus(true);
+        nutricionista.setCodStatus(false); // aguarda aprovação via pagamento PIX
         Nutricionista salvo = (Nutricionista) usuarioRepository.save(nutricionista);
-        log.info("Nutricionista cadastrado: id={} email={}", salvo.getId(), salvo.getEmail());
+        log.info("Nutricionista cadastrado: id={} email={} crn={}", salvo.getId(), salvo.getEmail(), salvo.getCrn());
         return ResponseEntity.ok(Map.of("id", salvo.getId(), "nomeCompleto", salvo.getNomeCompleto(), "email", salvo.getEmail()));
     }
 
@@ -85,8 +96,24 @@ public class UsuarioController {
         if (anamnese.getCliente() == null || anamnese.getCliente().getId() == null) {
             return ResponseEntity.badRequest().body(Map.of("message", "Cliente é obrigatório na anamnese."));
         }
+        // Upsert: update existing record if one already exists for this client
+        Anamnese existing = anamneseRepository.findByClienteId(anamnese.getCliente().getId());
+        if (existing != null) {
+            existing.setPeso(anamnese.getPeso());
+            existing.setAltura(anamnese.getAltura());
+            existing.setIdade(anamnese.getIdade());
+            existing.setSexo(anamnese.getSexo());
+            existing.setObjetivo(anamnese.getObjetivo());
+            existing.setAtividade(anamnese.getAtividade());
+            existing.setSono(anamnese.getSono());
+            existing.setComorbidades(anamnese.getComorbidades());
+            existing.setRestricoes(anamnese.getRestricoes());
+            Anamnese salva = anamneseRepository.save(existing);
+            log.info("Anamnese atualizada (upsert): id={} clienteId={}", salva.getId(), salva.getCliente().getId());
+            return ResponseEntity.ok(salva);
+        }
         Anamnese salva = anamneseRepository.save(anamnese);
-        log.info("Anamnese salva: id={} clienteId={}", salva.getId(), salva.getCliente().getId());
+        log.info("Anamnese criada: id={} clienteId={}", salva.getId(), salva.getCliente().getId());
         return ResponseEntity.ok(salva);
     }
 }

@@ -29,10 +29,23 @@ public class Consulta {
     private boolean codStatus;
 
     @ManyToOne(cascade = CascadeType.MERGE, fetch = FetchType.EAGER)
-    @JoinColumn(name = "id_cliente", referencedColumnName = "id", nullable = false)
+    @JoinColumn(name = "id_cliente", referencedColumnName = "id")
     private Cliente cliente;
 
     @ManyToOne(cascade = CascadeType.MERGE, fetch = FetchType.EAGER)
-    @JoinColumn(name = "id_nutricionista", referencedColumnName = "id", nullable = false)
+    @JoinColumn(name = "id_nutricionista", referencedColumnName = "id")
     private Nutricionista nutricionista;
+
+    // campos extras para a agenda
+    @Column(length = 500)
+    private String videoLink;
+
+    @Column(length = 1000)
+    private String observations;
+
+    @Column(length = 100)
+    private String pacienteNome;
+
+    @Column(length = 100)
+    private String nutricionistaNome;
 }

@@ -28,6 +28,14 @@ public class PlanoAlimentarService {
     // ── MÉTODO PRINCIPAL ───────────────────────────────────────────
 
     public PlanoAlimentar gerarPlano(Long usuarioId) {
+        return gerarPlanoInterno(usuarioId, false);
+    }
+
+    public PlanoAlimentar regenerarPlano(Long usuarioId) {
+        return gerarPlanoInterno(usuarioId, true);
+    }
+
+    private PlanoAlimentar gerarPlanoInterno(Long usuarioId, boolean forcar) {
         Anamnese anamnese = anamneseRepository.findByClienteId(usuarioId);
         if (anamnese == null) throw new RuntimeException("Anamnese não encontrada para o usuário " + usuarioId);
 
@@ -37,9 +45,16 @@ public class PlanoAlimentarService {
         String hashAtual = gerarHashAnamnese(anamnese);
 
         var planoExistente = planoRepository.findTopByClienteIdOrderByDataInicioDesc(usuarioId);
-        if (planoExistente.isPresent() && hashAtual.equals(planoExistente.get().getAnamneseHash())) {
-            log.info("Plano existente retornado para usuarioId={}", usuarioId);
-            return planoExistente.get();
+        // Reutiliza plano se: mesma anamnese, menos de 7 dias e não é forçado
+        if (!forcar && planoExistente.isPresent()) {
+            PlanoAlimentar p = planoExistente.get();
+            boolean mesmaAnamnese = hashAtual.equals(p.getAnamneseHash());
+            boolean dentroDosPrazo = p.getDataInicio() != null &&
+                !p.getDataInicio().plusDays(7).isBefore(LocalDate.now());
+            if (mesmaAnamnese && dentroDosPrazo) {
+                log.info("Plano existente retornado para usuarioId={}", usuarioId);
+                return p;
+            }
         }
 
         PlanoAlimentar plano = new PlanoAlimentar();

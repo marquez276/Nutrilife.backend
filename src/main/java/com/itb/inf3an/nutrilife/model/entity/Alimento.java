@@ -27,6 +27,16 @@ public class Alimento {
     @Transient @JsonIgnore private boolean temAnimal;
     @Transient @JsonIgnore private boolean temCarne;
 
+    // alimento customizado por paciente (refeicao_id será null)
+    @Column(name = "cliente_id")
+    private Long clienteId;
+
+    @Column(name = "customizado")
+    private boolean customizado;
+
+    @Column(name = "categoria", length = 50)
+    private String categoria;
+
     @ManyToOne
     @JoinColumn(name = "refeicao_id")
     @JsonBackReference("refeicao-alimentos")

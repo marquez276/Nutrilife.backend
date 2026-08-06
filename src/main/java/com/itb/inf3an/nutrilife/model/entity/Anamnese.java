@@ -4,6 +4,9 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.*;
 import lombok.Getter;
 import lombok.Setter;
+import java.util.Set;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 
 @Entity
 @Table(name = "Anamnese")
@@ -35,13 +38,18 @@ public class Anamnese {
     private Integer idade;
 
     @NotBlank(message = "Sexo é obrigatório")
+    @Pattern(regexp = "M|F", message = "Sexo deve ser M ou F")
     @Column(length = 20)
     private String sexo;
 
     @NotBlank(message = "Objetivo é obrigatório")
+    @Pattern(regexp = "EMAGRECIMENTO|HIPERTROFIA|MANUTENCAO|PERFORMANCE",
+             message = "Objetivo inválido. Use: EMAGRECIMENTO, HIPERTROFIA, MANUTENCAO ou PERFORMANCE")
     @Column(length = 50)
     private String objetivo;
 
+    @Pattern(regexp = "sedentario|leve|moderado|intenso",
+             message = "Atividade inválida. Use: sedentario, leve, moderado ou intenso")
     @Column(length = 50)
     private String atividade;
 
@@ -54,4 +62,31 @@ public class Anamnese {
 
     @Column(length = 255)
     private String restricoes;
+
+    private static final Set<String> COMORBIDADES_VALIDAS = Set.of(
+        "Diabetes tipo 1", "Diabetes tipo 2", "Hipertensão arterial", "Colesterol alto",
+        "Triglicerídeos altos", "Hipotireoidismo", "Hipertireoidismo", "Obesidade",
+        "Síndrome metabólica", "Doença celíaca", "Intolerância à lactose", "Anemia", "Nenhuma"
+    );
+
+    private static final Set<String> RESTRICOES_VALIDAS = Set.of(
+        "Lactose", "Glúten", "Frutos do mar", "Amendoim", "Ovos", "Soja",
+        "Nozes e castanhas", "Vegano", "Vegetariano", "Ovolactovegetariano", "Nenhuma"
+    );
+
+    @AssertTrue(message = "Uma ou mais comorbidades informadas são inválidas")
+    public boolean isComorbidadesValidas() {
+        if (comorbidades == null || comorbidades.isBlank()) return true;
+        return Arrays.stream(comorbidades.split(", "))
+            .map(String::trim)
+            .allMatch(COMORBIDADES_VALIDAS::contains);
+    }
+
+    @AssertTrue(message = "Uma ou mais restrições informadas são inválidas")
+    public boolean isRestricoesValidas() {
+        if (restricoes == null || restricoes.isBlank()) return true;
+        return Arrays.stream(restricoes.split(", "))
+            .map(String::trim)
+            .allMatch(RESTRICOES_VALIDAS::contains);
+    }
 }
