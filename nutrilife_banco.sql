@@ -150,17 +150,6 @@ CREATE TABLE Avaliacao (
 );
 GO
 
-CREATE TABLE Pagamento_Pix (
-    id               BIGINT    IDENTITY(1,1) PRIMARY KEY,
-    nutricionista_id BIGINT    NOT NULL REFERENCES Usuario(id),
-    comprovante_url  TEXT      NULL,
-    status           VARCHAR(20)  NOT NULL DEFAULT 'PENDENTE',
-    data_envio       DATETIME2    NOT NULL DEFAULT GETDATE(),
-    data_aprovacao   DATETIME2    NULL,
-    observacao       VARCHAR(255) NULL
-);
-GO
-
 CREATE TABLE Log_Atividade (
     id           BIGINT IDENTITY(1,1) PRIMARY KEY,
     usuario_nome VARCHAR(100) NULL,
@@ -174,3 +163,5 @@ GO
 INSERT INTO Usuario (tipo_usuario, nome_completo, email, senha, cod_status, aprovado, principal)
 VALUES ('ADMIN', 'Administrador', 'admin@nutrilife.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL523Cp2', 1, 1, 1);
 GO
+
+SELECT * FROM Usuario;

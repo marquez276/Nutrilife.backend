@@ -58,7 +58,7 @@ public class UsuarioController {
             return ResponseEntity.badRequest().body(Map.of("message", "CRN já cadastrado no sistema."));
         }
         nutricionista.setSenha(encoder.encode(nutricionista.getSenha()));
-        nutricionista.setCodStatus(false); // aguarda aprovação via pagamento PIX
+        nutricionista.setCodStatus(false);
         Nutricionista salvo = (Nutricionista) usuarioRepository.save(nutricionista);
         log.info("Nutricionista cadastrado: id={} email={} crn={}", salvo.getId(), salvo.getEmail(), salvo.getCrn());
         return ResponseEntity.ok(Map.of("id", salvo.getId(), "nomeCompleto", salvo.getNomeCompleto(), "email", salvo.getEmail()));

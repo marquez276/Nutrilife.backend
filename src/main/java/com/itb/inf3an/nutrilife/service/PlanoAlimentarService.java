@@ -25,7 +25,6 @@ public class PlanoAlimentarService {
 
     private final SecureRandom random = new SecureRandom();
 
-    // ── MÉTODO PRINCIPAL ───────────────────────────────────────────
 
     public PlanoAlimentar gerarPlano(Long usuarioId) {
         return gerarPlanoInterno(usuarioId, false);

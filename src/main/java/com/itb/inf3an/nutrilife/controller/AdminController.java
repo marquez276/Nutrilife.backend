@@ -9,7 +9,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
@@ -29,17 +28,13 @@ public class AdminController {
 
     @Autowired private LogAtividadeRepository logRepo;
     @Autowired private AvaliacaoRepository avaliacaoRepo;
-    @Autowired private PagamentoPixRepository pagamentoRepo;
     @Autowired private NutriPerfilRepository nutriPerfilRepo;
     @Autowired private UsuarioRepository usuarioRepo;
     @Autowired private AdminRepository adminRepo;
     @Autowired private AlimentoRepository alimentoRepo;
     @Autowired private AnamneseRepository anamneseRepo;
 
-    // configuração de inatividade (dias) — persistência simples em memória
     private int diasInatividade = 30;
-
-    // ── USUÁRIOS (DASHBOARD) ────────────────────────────────────────
 
     @GetMapping("/admin/usuarios")
     public ResponseEntity<?> listarUsuarios() {
@@ -84,13 +79,8 @@ public class AdminController {
         return ResponseEntity.ok(result);
     }
 
-    // ── CRESCIMENTO MENSAL ─────────────────────────────────────────
-
     @GetMapping("/admin/crescimento")
     public ResponseEntity<?> crescimento() {
-        // Conta cadastros (pacientes+nutris) agrupados por mês/ano baseado nos logs de login
-        // Como Usuario não tem dataCadastro, usamos os logs de "Cadastro" para aproximação
-        // Retorna os últimos 6 meses com total acumulado de usuários
         long total = usuarioRepo.count();
         YearMonth now = YearMonth.now();
         List<Map<String, Object>> data = new ArrayList<>();
@@ -98,14 +88,11 @@ public class AdminController {
             YearMonth ym = now.minusMonths(i);
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("month", ym.getMonth().getDisplayName(java.time.format.TextStyle.SHORT, new java.util.Locale("pt", "BR")));
-            // Distribui o total atual como referência do mês mais recente
             entry.put("users", i == 0 ? total : Math.max(0, total - i));
             data.add(entry);
         }
         return ResponseEntity.ok(data);
     }
-
-    // ── VERIFICAÇÃO DE CRN ─────────────────────────────────────────
 
     @GetMapping("/admin/verificar-crn")
     public ResponseEntity<?> verificarCrn(@RequestParam String crn) {
@@ -113,8 +100,6 @@ public class AdminController {
             .stream().anyMatch(u -> crn.equalsIgnoreCase(u.getCrn()));
         return ResponseEntity.ok(Map.of("disponivel", !existe));
     }
-
-    // ── CONFIGURAÇÕES ────────────────────────────────────────────────
 
     @GetMapping("/admin/configuracoes")
     public ResponseEntity<?> getConfiguracoes() {
@@ -125,12 +110,9 @@ public class AdminController {
     public ResponseEntity<?> salvarConfiguracoes(@RequestBody Map<String, Object> body) {
         if (body.containsKey("diasInatividade")) {
             diasInatividade = Integer.parseInt(body.get("diasInatividade").toString());
-            log.info("Configuração de inatividade atualizada: {} dias", diasInatividade);
         }
         return ResponseEntity.ok(Map.of("diasInatividade", diasInatividade, "message", "Configurações salvas."));
     }
-
-    // ── PERFIL ADMIN ───────────────────────────────────────────────
 
     @GetMapping("/admin/perfil/{id}")
     public ResponseEntity<?> getPerfil(@PathVariable Long id) {
@@ -144,8 +126,6 @@ public class AdminController {
             .orElse(ResponseEntity.notFound().build());
     }
 
-    // ── APROVAÇÃO DE ADMINS ────────────────────────────────────────
-
     @GetMapping("/admin/pendentes")
     public List<Admin> listarAdminsPendentes() {
         return adminRepo.findByAprovadoFalse();
@@ -156,12 +136,9 @@ public class AdminController {
         return adminRepo.findById(id).map(a -> {
             a.setAprovado(true);
             adminRepo.save(a);
-            log.info("Admin id={} aprovado", id);
             return ResponseEntity.ok(Map.of("message", "Admin aprovado."));
         }).orElse(ResponseEntity.notFound().build());
     }
-
-    // ── LOGS ──────────────────────────────────────────────────────
 
     @GetMapping("/admin/logs")
     public ResponseEntity<?> listarLogs(@RequestParam(defaultValue = "0") int page,
@@ -183,8 +160,6 @@ public class AdminController {
         return ResponseEntity.ok(logRepo.save(logAtividade));
     }
 
-    // ── AVALIAÇÕES ────────────────────────────────────────────────
-
     @GetMapping("/avaliacoes/nutricionista/{nutricionistaId}")
     public List<Map<String, Object>> listarAvaliacoes(@PathVariable Long nutricionistaId) {
         return avaliacaoRepo.findByNutricionistaId(nutricionistaId).stream().map(a -> {
@@ -202,7 +177,6 @@ public class AdminController {
     public ResponseEntity<?> salvarAvaliacao(@RequestBody Avaliacao avaliacao) {
         avaliacao.setDataAvaliacao(java.time.LocalDate.now());
         Avaliacao salva = avaliacaoRepo.save(avaliacao);
-        log.info("Avaliação salva para nutricionistaId={}", avaliacao.getNutricionista().getId());
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("id",            salva.getId());
         resp.put("nota",          salva.getNota());
@@ -212,103 +186,19 @@ public class AdminController {
         return ResponseEntity.ok(resp);
     }
 
-    // ── PAGAMENTOS PIX ────────────────────────────────────────────
-
-    @GetMapping("/admin/pagamentos")
-    public List<PagamentoPix> listarPagamentos() {
-        return pagamentoRepo.findByStatusOrderByDataEnvioDesc("PENDENTE");
-    }
-
-    @GetMapping("/admin/pagamentos/todos")
-    public List<Map<String, Object>> listarTodosPagamentos() {
-        return pagamentoRepo.findAll(Sort.by(Sort.Direction.DESC, "dataEnvio")).stream().map(p -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id",            p.getId());
-            m.put("status",        p.getStatus());
-            m.put("temComprovante", p.getComprovanteUrl() != null && !p.getComprovanteUrl().isBlank());
-            m.put("dataEnvio",     p.getDataEnvio());
-            m.put("dataAprovacao", p.getDataAprovacao());
-            m.put("observacao",    p.getObservacao());
-            if (p.getNutricionista() != null) {
-                Usuario u = p.getNutricionista();
-                Map<String, Object> nutri = new LinkedHashMap<>();
-                nutri.put("id",           u.getId());
-                nutri.put("nomeCompleto", u.getNomeCompleto());
-                nutri.put("email",        u.getEmail());
-                nutri.put("telefone",     u.getTelefone());
-                nutri.put("crn",          u.getCrn());
-                m.put("nutricionista", nutri);
-            }
-            return m;
-        }).collect(Collectors.toList());
-    }
-
-    @GetMapping("/admin/pagamentos/{id}/comprovante")
-    public ResponseEntity<?> getComprovante(@PathVariable Long id) {
-        return pagamentoRepo.findById(id)
-            .filter(p -> p.getComprovanteUrl() != null && !p.getComprovanteUrl().isBlank())
-            .map(p -> ResponseEntity.ok(Map.of("comprovanteUrl", p.getComprovanteUrl())))
-            .orElse(ResponseEntity.notFound().build());
-    }
-
-    @PostMapping("/pagamentos/pix")
-    public ResponseEntity<?> enviarComprovante(@RequestBody PagamentoPix pagamento) {
-        pagamento.setStatus("PENDENTE");
-        pagamento.setDataEnvio(LocalDateTime.now());
-        PagamentoPix salvo = pagamentoRepo.save(pagamento);
-        log.info("Comprovante PIX enviado por nutricionistaId={}", pagamento.getNutricionista().getId());
-        return ResponseEntity.ok(Map.of("id", salvo.getId(), "status", salvo.getStatus()));
-    }
-
-    @GetMapping("/pagamentos/pix/status/{nutricionistaId}")
-    public ResponseEntity<?> statusPagamento(@PathVariable Long nutricionistaId) {
-        return pagamentoRepo.findByNutricionistaIdOrderByDataEnvioDesc(nutricionistaId)
-            .stream().findFirst()
-            .map(p -> ResponseEntity.ok(Map.of(
-                "id",     p.getId(),
-                "status", p.getStatus()
-            )))
-            .orElse(ResponseEntity.notFound().build());
-    }
-
-    @PutMapping("/admin/pagamentos/{id}/aprovar")
-    public ResponseEntity<?> aprovarPagamento(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body) {
-        return pagamentoRepo.findById(id).map(p -> {
-            p.setStatus("APROVADO");
-            p.setDataAprovacao(LocalDateTime.now());
-            if (body != null && body.containsKey("observacao")) p.setObservacao(body.get("observacao"));
-            pagamentoRepo.save(p);
-            // ativa a conta do nutricionista
-            usuarioRepo.findById(p.getNutricionista().getId()).ifPresent(u -> {
-                u.setCodStatus(true);
-                usuarioRepo.save(u);
-            });
-            log.info("Pagamento id={} aprovado, nutricionista ativado", id);
-            return ResponseEntity.ok(Map.of("message", "Pagamento aprovado e nutricionista liberado."));
-        }).orElse(ResponseEntity.notFound().build());
-    }
-
-    @PutMapping("/admin/pagamentos/{id}/rejeitar")
-    public ResponseEntity<?> rejeitarPagamento(@PathVariable Long id, @RequestBody(required = false) Map<String, String> body) {
-        return pagamentoRepo.findById(id).map(p -> {
-            p.setStatus("REJEITADO");
-            if (body != null && body.containsKey("observacao")) p.setObservacao(body.get("observacao"));
-            pagamentoRepo.save(p);
-            log.info("Pagamento id={} rejeitado", id);
-            return ResponseEntity.ok(Map.of("message", "Pagamento rejeitado."));
-        }).orElse(ResponseEntity.notFound().build());
-    }
-
-    // ── PERFIL PÚBLICO DO NUTRICIONISTA ───────────────────────────
-
     @GetMapping("/nutricionistas/perfis")
     public List<Map<String, Object>> listarPerfis() {
-        // Returns all active nutritionists, merging profile data where available
         return usuarioRepo.findByTipoUsuario(TipoUsuario.NUTRICIONISTA).stream()
-            .filter(u -> u.isCodStatus())
             .map(u -> {
+                Map<String, Object> nutri = new LinkedHashMap<>();
+                nutri.put("id", u.getId());
+                nutri.put("nomeCompleto", u.getNomeCompleto());
+                nutri.put("email", u.getEmail());
+                nutri.put("telefone", u.getTelefone());
+                nutri.put("crn", u.getCrn());
+
                 Map<String, Object> m = new LinkedHashMap<>();
-                m.put("nutricionista", u);
+                m.put("nutricionista", nutri);
                 nutriPerfilRepo.findByNutricionistaId(u.getId()).ifPresent(p -> {
                     m.put("especialidade", p.getEspecialidade());
                     m.put("bio", p.getBio());
@@ -364,8 +254,6 @@ public class AdminController {
             .orElse(ResponseEntity.notFound().build());
     }
 
-    // ── ALIMENTOS ─────────────────────────────────────────────────
-
     @GetMapping("/admin/alimentos")
     public List<Alimento> listarAlimentos() {
         return alimentoRepo.findAll();
@@ -395,17 +283,13 @@ public class AdminController {
         return ResponseEntity.ok(Map.of("message", "Removido."));
     }
 
-    // ── ESTATÍSTICAS ADMIN ────────────────────────────────────────
-
     @GetMapping("/admin/stats")
     public ResponseEntity<?> stats() {
         long totalPacientes      = usuarioRepo.countByTipoUsuario(TipoUsuario.CLIENTE);
         long totalNutricionistas = usuarioRepo.countByTipoUsuario(TipoUsuario.NUTRICIONISTA);
         long totalCadastros      = totalPacientes + totalNutricionistas;
-        long pendentes           = pagamentoRepo.findByStatusOrderByDataEnvioDesc("PENDENTE").size();
         long totalLogs           = logRepo.count();
 
-        // Média de avaliações de todos nutricionistas
         List<Avaliacao> todasAvaliacoes = avaliacaoRepo.findAll();
         double mediaGeral = todasAvaliacoes.stream().mapToInt(Avaliacao::getNota).average().orElse(0);
 
@@ -413,7 +297,6 @@ public class AdminController {
             "totalPacientes",      totalPacientes,
             "totalNutricionistas", totalNutricionistas,
             "totalCadastros",      totalCadastros,
-            "pagamentosPendentes", pendentes,
             "totalLogs",           totalLogs,
             "mediaAvaliacoes",     todasAvaliacoes.isEmpty() ? null : Math.round(mediaGeral * 10.0) / 10.0
         ));
