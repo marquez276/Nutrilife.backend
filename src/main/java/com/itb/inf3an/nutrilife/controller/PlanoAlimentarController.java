@@ -1,7 +1,7 @@
 package com.itb.inf3an.nutrilife.controller;
 
 import com.itb.inf3an.nutrilife.model.entity.PlanoAlimentar;
-import com.itb.inf3an.nutrilife.service.PlanoAlimentarService;
+import com.itb.inf3an.nutrilife.model.services.PlanoAlimentarService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,9 +27,10 @@ public class PlanoAlimentarController {
 
     @PostMapping("/regenerar/{usuarioId}")
     public PlanoAlimentar regenerarPlano(@PathVariable Long usuarioId) {
-        log.info("Regenerando plano (forçado) para usuarioId={}", usuarioId);
+        log.info("Regenerando plano (forÃ§ado) para usuarioId={}", usuarioId);
         PlanoAlimentar plano = service.regenerarPlano(usuarioId);
         log.info("Novo plano id={} gerado para usuarioId={}", plano.getId(), usuarioId);
         return plano;
     }
 }
+

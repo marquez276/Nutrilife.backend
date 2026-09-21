@@ -1,7 +1,7 @@
 package com.itb.inf3an.nutrilife.controller;
 
 import com.itb.inf3an.nutrilife.model.entity.*;
-import com.itb.inf3an.nutrilife.repository.*;
+import com.itb.inf3an.nutrilife.model.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -43,7 +43,7 @@ public class RegistroController {
     @Autowired
     private PlanoAlimentarRepository planoRepo;
 
-    //  REFEIÇÕES DIÁRIAS 
+    //  REFEIÃ‡Ã•ES DIÃRIAS 
 
     @GetMapping("/registros/refeicoes/{clienteId}")
     public List<RegistroRefeicao> listarRefeicoes(@PathVariable Long clienteId) {
@@ -133,7 +133,7 @@ public class RegistroController {
         return ResponseEntity.ok(result);
     }
 
-    // ATUALIZAR USUÁRIO
+    // ATUALIZAR USUÃRIO
 
     @PutMapping("/usuarios/{id}")
     public ResponseEntity<?> atualizarUsuario(@PathVariable Long id, @RequestBody Map<String, String> dados) {
@@ -205,7 +205,7 @@ public class RegistroController {
             planoRepo.findTopByClienteIdOrderByDataInicioDesc(clienteId).ifPresent(plano -> {
                 plano.setAnamneseHash(null);
                 planoRepo.save(plano);
-                log.info("Hash do plano invalidado para clienteId={} após atualização de anamnese", clienteId);
+                log.info("Hash do plano invalidado para clienteId={} apÃ³s atualizaÃ§Ã£o de anamnese", clienteId);
             });
             return ResponseEntity.ok(salva);
         }).orElse(ResponseEntity.notFound().build());
@@ -257,7 +257,7 @@ public class RegistroController {
         m.setTdee((int) Math.round(tdee));
         m.setBmr((int) Math.round(bmr));
         m.setPesoIdeal(Math.round(pesoIdeal * 10.0) / 10.0);
-        // Only set pesoInicial once — the first time metas are created
+        // Only set pesoInicial once â€” the first time metas are created
         if (m.getPesoInicial() == null && a.getPeso() != null) {
             m.setPesoInicial(a.getPeso());
         }
@@ -267,15 +267,15 @@ public class RegistroController {
         metasRepo.save(m);
     }
 
-    // PRONTUÁRIO - OBSERVAÇÕES CLÍNICAS
-    // Usa o próprio campo observations da Consulta para guardar notas por paciente.
+    // PRONTUÃRIO - OBSERVAÃ‡Ã•ES CLÃNICAS
+    // Usa o prÃ³prio campo observations da Consulta para guardar notas por paciente.
     // Endpoint dedicado: GET/POST /prontuario/{nutricionistaId}/{pacienteNome}
 
     @GetMapping("/prontuario/{nutricionistaId}/{pacienteNome}")
     public ResponseEntity<?> buscarProntuario(
             @PathVariable Long nutricionistaId,
             @PathVariable String pacienteNome) {
-        // Busca a consulta mais recente deste nutricionista para este paciente que tenha observações
+        // Busca a consulta mais recente deste nutricionista para este paciente que tenha observaÃ§Ãµes
         return consultaRepo.findByNutricionistaId(nutricionistaId).stream()
             .filter(c -> pacienteNome.equalsIgnoreCase(c.getPacienteNome()) && c.getObservations() != null)
             .max(java.util.Comparator.comparing(c -> c.getDataConsulta() != null ? c.getDataConsulta() : java.time.LocalDate.MIN))
@@ -288,7 +288,7 @@ public class RegistroController {
 
     @PostMapping("/prontuario")
     public ResponseEntity<?> salvarProntuario(@RequestBody Map<String, Object> body) {
-        // Cria ou atualiza uma consulta de prontuário (sem data/hora, só observações)
+        // Cria ou atualiza uma consulta de prontuÃ¡rio (sem data/hora, sÃ³ observaÃ§Ãµes)
         Long consultaId = body.containsKey("consultaId") && body.get("consultaId") != null
             ? Long.parseLong(body.get("consultaId").toString()) : null;
 
@@ -311,7 +311,7 @@ public class RegistroController {
         return ResponseEntity.ok(Map.of("id", salva.getId(), "observations", salva.getObservations() != null ? salva.getObservations() : ""));
     }
 
-    // PESAGENS DO PACIENTE (para o nutricionista ver evolução)
+    // PESAGENS DO PACIENTE (para o nutricionista ver evoluÃ§Ã£o)
 
     @PostMapping("/registros/pesagens/nutricionista")
     public ResponseEntity<?> salvarPesagemPaciente(@RequestBody Map<String, Object> body) {
@@ -346,4 +346,5 @@ public class RegistroController {
         return ResponseEntity.ok(result);
     }
 }
+
 

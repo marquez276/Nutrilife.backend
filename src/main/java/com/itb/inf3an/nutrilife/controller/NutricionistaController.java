@@ -2,8 +2,8 @@ package com.itb.inf3an.nutrilife.controller;
 
 import com.itb.inf3an.nutrilife.model.entity.Nutricionista;
 import com.itb.inf3an.nutrilife.model.entity.NutricionistaPerfil;
-import com.itb.inf3an.nutrilife.repository.NutriPerfilRepository;
-import com.itb.inf3an.nutrilife.repository.UsuarioRepository;
+import com.itb.inf3an.nutrilife.model.repository.NutriPerfilRepository;
+import com.itb.inf3an.nutrilife.model.repository.UsuarioRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -20,12 +20,12 @@ public class NutricionistaController {
     @Autowired private NutriPerfilRepository perfilRepo;
     @Autowired private UsuarioRepository usuarioRepo;
 
-    /** POST /nutricionistas/{id}/portfolio — appends one image (Base64 data URL) to the portfolio list */
+    /** POST /nutricionistas/{id}/portfolio â€” appends one image (Base64 data URL) to the portfolio list */
     @PostMapping("/nutricionistas/{id}/portfolio")
     public ResponseEntity<?> uploadPortfolio(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
         return usuarioRepo.findById(id).map(u -> {
             if (!(u instanceof Nutricionista nutri)) {
-                return ResponseEntity.badRequest().body(Map.of("message", "Usuário não é nutricionista."));
+                return ResponseEntity.badRequest().body(Map.of("message", "UsuÃ¡rio nÃ£o Ã© nutricionista."));
             }
             try {
                 String mime = file.getContentType() != null ? file.getContentType() : "image/jpeg";
@@ -44,3 +44,4 @@ public class NutricionistaController {
     }
 
 }
+

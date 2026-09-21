@@ -1,7 +1,7 @@
 package com.itb.inf3an.nutrilife.controller;
 
 import com.itb.inf3an.nutrilife.model.entity.Alimento;
-import com.itb.inf3an.nutrilife.repository.AlimentoRepository;
+import com.itb.inf3an.nutrilife.model.repository.AlimentoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -39,3 +39,4 @@ public class AlimentoController {
             .orElse(ResponseEntity.notFound().build());
     }
 }
+

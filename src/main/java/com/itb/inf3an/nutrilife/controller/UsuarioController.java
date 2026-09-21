@@ -4,9 +4,9 @@ import com.itb.inf3an.nutrilife.model.entity.Anamnese;
 import com.itb.inf3an.nutrilife.model.entity.Cliente;
 import com.itb.inf3an.nutrilife.model.entity.Nutricionista;
 import com.itb.inf3an.nutrilife.model.entity.Usuario;
-import com.itb.inf3an.nutrilife.repository.AnamneseRepository;
-import com.itb.inf3an.nutrilife.repository.ClienteRepository;
-import com.itb.inf3an.nutrilife.repository.UsuarioRepository;
+import com.itb.inf3an.nutrilife.model.repository.AnamneseRepository;
+import com.itb.inf3an.nutrilife.model.repository.ClienteRepository;
+import com.itb.inf3an.nutrilife.model.repository.UsuarioRepository;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +31,7 @@ public class UsuarioController {
 
     @PostMapping("/usuarios/paciente")
     public ResponseEntity<?> cadastrarPaciente(@Valid @RequestBody Cliente cliente) {
-        if (usuarioRepository.findByEmail(cliente.getEmail()) != null) {
+        if (usuarioRepository.findByEmail(cliente.getEmail()).isPresent()) {
             return ResponseEntity.badRequest().body(Map.of("message", "E-mail já cadastrado."));
         }
         cliente.setSenha(encoder.encode(cliente.getSenha()));
@@ -43,7 +43,7 @@ public class UsuarioController {
 
     @PostMapping("/usuarios/nutricionista")
     public ResponseEntity<?> cadastrarNutricionista(@Valid @RequestBody Nutricionista nutricionista) {
-        if (usuarioRepository.findByEmail(nutricionista.getEmail()) != null) {
+        if (usuarioRepository.findByEmail(nutricionista.getEmail()).isPresent()) {
             return ResponseEntity.badRequest().body(Map.of("message", "E-mail já cadastrado."));
         }
         if (nutricionista.getCrn() == null || nutricionista.getCrn().isBlank()) {
@@ -73,15 +73,25 @@ public class UsuarioController {
             return ResponseEntity.badRequest().body(Map.of("message", "E-mail e senha são obrigatórios."));
         }
 
-        Usuario usuario = usuarioRepository.findByEmail(email);
+        Usuario usuario = usuarioRepository.findByEmail(email).orElse(null);
 
         if (usuario == null) {
             log.warn("Tentativa de login com e-mail inexistente: {}", email);
             return ResponseEntity.status(401).body(Map.of("message", "E-mail ou senha inválidos."));
         }
 
-        // suporta senha em BCrypt e senha em texto puro (para usuários antigos)
-        boolean senhaValida = encoder.matches(senha, usuario.getSenha()) || usuario.getSenha().equals(senha);
+        // Suporta senha em BCrypt e migra automaticamente senhas legadas em texto puro
+        boolean senhaValida;
+        if (encoder.matches(senha, usuario.getSenha())) {
+            senhaValida = true;
+        } else if (usuario.getSenha().equals(senha)) {
+            senhaValida = true;
+            usuario.setSenha(encoder.encode(senha));
+            usuarioRepository.save(usuario);
+            log.info("Senha legada em texto puro migrada com sucesso para BCrypt hash para o usuário: {}", email);
+        } else {
+            senhaValida = false;
+        }
         if (!senhaValida) {
             log.warn("Senha incorreta para: {}", email);
             return ResponseEntity.status(401).body(Map.of("message", "E-mail ou senha inválidos."));

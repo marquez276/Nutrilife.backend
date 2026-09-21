@@ -2,7 +2,7 @@ package com.itb.inf3an.nutrilife.controller;
 
 import com.itb.inf3an.nutrilife.model.entity.*;
 import com.itb.inf3an.nutrilife.model.enums.TipoUsuario;
-import com.itb.inf3an.nutrilife.repository.*;
+import com.itb.inf3an.nutrilife.model.repository.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -111,7 +111,7 @@ public class AdminController {
         if (body.containsKey("diasInatividade")) {
             diasInatividade = Integer.parseInt(body.get("diasInatividade").toString());
         }
-        return ResponseEntity.ok(Map.of("diasInatividade", diasInatividade, "message", "Configurações salvas."));
+        return ResponseEntity.ok(Map.of("diasInatividade", diasInatividade, "message", "ConfiguraÃ§Ãµes salvas."));
     }
 
     @GetMapping("/admin/perfil/{id}")
@@ -302,3 +302,4 @@ public class AdminController {
         ));
     }
 }
+

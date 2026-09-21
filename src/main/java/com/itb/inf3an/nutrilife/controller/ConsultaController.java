@@ -1,7 +1,7 @@
 package com.itb.inf3an.nutrilife.controller;
 
 import com.itb.inf3an.nutrilife.model.entity.Consulta;
-import com.itb.inf3an.nutrilife.repository.ConsultaRepository;
+import com.itb.inf3an.nutrilife.model.repository.ConsultaRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -83,7 +83,7 @@ public class ConsultaController {
         if (body.containsKey("nutritionist"))
             c.setNutricionistaNome(body.get("nutritionist") != null ? body.get("nutritionist").toString() : null);
 
-        // vínculos opcionais por ID
+        // vÃ­nculos opcionais por ID
         if (body.containsKey("clienteId") && body.get("clienteId") != null) {
             var cli = new com.itb.inf3an.nutrilife.model.entity.Cliente();
             cli.setId(Long.parseLong(body.get("clienteId").toString()));
@@ -96,3 +96,4 @@ public class ConsultaController {
         }
     }
 }
+

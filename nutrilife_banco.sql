@@ -159,6 +159,17 @@ CREATE TABLE Log_Atividade (
 );
 GO
 
+CREATE TABLE tokens (
+    id BIGINT NOT NULL IDENTITY(1,1) PRIMARY KEY,
+    token VARCHAR(255) NULL,
+    revoked BIT NOT NULL,
+    expired BIT NOT NULL,
+    token_type VARCHAR(255) NULL,
+    usuario_id BIGINT NULL,
+    CONSTRAINT fk_tokens_usuario_id FOREIGN KEY (usuario_id) REFERENCES Usuario(id)
+);
+GO
+
 -- Admin padrão (senha: admin123)
 INSERT INTO Usuario (tipo_usuario, nome_completo, email, senha, cod_status, aprovado, principal)
 VALUES ('ADMIN', 'Administrador', 'admin@nutrilife.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL523Cp2', 1, 1, 1);
