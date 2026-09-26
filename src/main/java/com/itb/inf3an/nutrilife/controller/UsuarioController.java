@@ -7,6 +7,8 @@ import com.itb.inf3an.nutrilife.model.entity.Usuario;
 import com.itb.inf3an.nutrilife.model.repository.AnamneseRepository;
 import com.itb.inf3an.nutrilife.model.repository.ClienteRepository;
 import com.itb.inf3an.nutrilife.model.repository.UsuarioRepository;
+import com.itb.inf3an.nutrilife.model.services.Auditoria;
+import com.itb.inf3an.nutrilife.security.config.Authz;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,7 +20,6 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 @RestController
-@CrossOrigin(origins = "*")
 public class UsuarioController {
 
     private static final Logger log = LoggerFactory.getLogger(UsuarioController.class);
@@ -28,16 +29,20 @@ public class UsuarioController {
     @Autowired private UsuarioRepository usuarioRepository;
     @Autowired private ClienteRepository clienteRepository;
     @Autowired private AnamneseRepository anamneseRepository;
+    @Autowired private Authz authz;
+    @Autowired private Auditoria auditoria;
 
     @PostMapping("/usuarios/paciente")
     public ResponseEntity<?> cadastrarPaciente(@Valid @RequestBody Cliente cliente) {
         if (usuarioRepository.findByEmail(cliente.getEmail()).isPresent()) {
             return ResponseEntity.badRequest().body(Map.of("message", "E-mail já cadastrado."));
         }
+        cliente.setId(null);
         cliente.setSenha(encoder.encode(cliente.getSenha()));
         cliente.setCodStatus(true);
         Cliente salvo = clienteRepository.save(cliente);
         log.info("Paciente cadastrado: id={} email={}", salvo.getId(), salvo.getEmail());
+        auditoria.registrar(salvo.getNomeCompleto(), "Cadastro de paciente", "Sucesso");
         return ResponseEntity.ok(Map.of("id", salvo.getId(), "nomeCompleto", salvo.getNomeCompleto(), "email", salvo.getEmail()));
     }
 
@@ -57,48 +62,13 @@ public class UsuarioController {
                 .stream().anyMatch(u -> nutricionista.getCrn().equalsIgnoreCase(u.getCrn()))) {
             return ResponseEntity.badRequest().body(Map.of("message", "CRN já cadastrado no sistema."));
         }
+        nutricionista.setId(null);
         nutricionista.setSenha(encoder.encode(nutricionista.getSenha()));
         nutricionista.setCodStatus(false);
         Nutricionista salvo = (Nutricionista) usuarioRepository.save(nutricionista);
         log.info("Nutricionista cadastrado: id={} email={} crn={}", salvo.getId(), salvo.getEmail(), salvo.getCrn());
+        auditoria.registrar(salvo.getNomeCompleto(), "Cadastro de nutricionista (CRN " + salvo.getCrn() + ")", "Sucesso");
         return ResponseEntity.ok(Map.of("id", salvo.getId(), "nomeCompleto", salvo.getNomeCompleto(), "email", salvo.getEmail()));
-    }
-
-    @PostMapping("/auth/login")
-    public ResponseEntity<?> login(@RequestBody Map<String, String> body) {
-        String email = body.get("email");
-        String senha = body.get("senha");
-
-        if (email == null || senha == null) {
-            return ResponseEntity.badRequest().body(Map.of("message", "E-mail e senha são obrigatórios."));
-        }
-
-        Usuario usuario = usuarioRepository.findByEmail(email).orElse(null);
-
-        if (usuario == null) {
-            log.warn("Tentativa de login com e-mail inexistente: {}", email);
-            return ResponseEntity.status(401).body(Map.of("message", "E-mail ou senha inválidos."));
-        }
-
-        // Suporta senha em BCrypt e migra automaticamente senhas legadas em texto puro
-        boolean senhaValida;
-        if (encoder.matches(senha, usuario.getSenha())) {
-            senhaValida = true;
-        } else if (usuario.getSenha().equals(senha)) {
-            senhaValida = true;
-            usuario.setSenha(encoder.encode(senha));
-            usuarioRepository.save(usuario);
-            log.info("Senha legada em texto puro migrada com sucesso para BCrypt hash para o usuário: {}", email);
-        } else {
-            senhaValida = false;
-        }
-        if (!senhaValida) {
-            log.warn("Senha incorreta para: {}", email);
-            return ResponseEntity.status(401).body(Map.of("message", "E-mail ou senha inválidos."));
-        }
-
-        log.info("Login realizado: id={} tipo={}", usuario.getId(), usuario.getTipoUsuario());
-        return ResponseEntity.ok(Map.of("usuario", usuario));
     }
 
     @PostMapping("/anamnese")
@@ -106,6 +76,7 @@ public class UsuarioController {
         if (anamnese.getCliente() == null || anamnese.getCliente().getId() == null) {
             return ResponseEntity.badRequest().body(Map.of("message", "Cliente é obrigatório na anamnese."));
         }
+        authz.check(anamnese.getCliente().getId());
         // Upsert: update existing record if one already exists for this client
         Anamnese existing = anamneseRepository.findByClienteId(anamnese.getCliente().getId());
         if (existing != null) {
@@ -122,6 +93,7 @@ public class UsuarioController {
             log.info("Anamnese atualizada (upsert): id={} clienteId={}", salva.getId(), salva.getCliente().getId());
             return ResponseEntity.ok(salva);
         }
+        anamnese.setId(null);
         Anamnese salva = anamneseRepository.save(anamnese);
         log.info("Anamnese criada: id={} clienteId={}", salva.getId(), salva.getCliente().getId());
         return ResponseEntity.ok(salva);

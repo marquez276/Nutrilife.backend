@@ -10,7 +10,13 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.itb.inf3an.nutrilife.exceptions.BadRequest;
+import com.itb.inf3an.nutrilife.security.config.Authz;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.core.context.SecurityContextHolder;
+import com.itb.inf3an.nutrilife.model.services.Auditoria;
+import com.itb.inf3an.nutrilife.model.services.CatalogoSeed;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -19,7 +25,6 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
-@CrossOrigin(origins = "*")
 public class AdminController {
 
     private static final Logger log = LoggerFactory.getLogger(AdminController.class);
@@ -33,16 +38,45 @@ public class AdminController {
     @Autowired private AdminRepository adminRepo;
     @Autowired private AlimentoRepository alimentoRepo;
     @Autowired private AnamneseRepository anamneseRepo;
+    @Autowired private Authz authz;
+    @Autowired private ConfiguracaoRepository configRepo;
+    @Autowired private ConsultaRepository consultaRepo;
+    @Autowired private Auditoria auditoria;
 
-    private int diasInatividade = 30;
+    private static final String CFG_DIAS_INATIVIDADE = "diasInatividade";
+
+    private int diasInatividade() {
+        return configRepo.findById(CFG_DIAS_INATIVIDADE).map(c -> Integer.parseInt(c.getValor())).orElse(30);
+    }
+
+    private Usuario atual() {
+        return SecurityContextHolder.getContext().getAuthentication().getPrincipal() instanceof Usuario u ? u : null;
+    }
+
+    // Sem acesso há mais de N dias (se nunca acessou, conta a partir do cadastro)
+    private boolean inativo(Usuario u, int dias) {
+        LocalDateTime ref = u.getUltimoAcesso() != null ? u.getUltimoAcesso() : u.getDataCadastro();
+        return ref != null && ref.isBefore(LocalDateTime.now().minusDays(dias));
+    }
+
+    private Map<String, Object> resumo(Usuario u, int dias) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", u.getId());
+        m.put("nome", u.getNomeCompleto());
+        m.put("email", u.getEmail());
+        m.put("telefone", u.getTelefone());
+        m.put("ativo", u.isCodStatus());
+        m.put("dataCadastro", u.getDataCadastro());
+        m.put("ultimoAcesso", u.getUltimoAcesso());
+        m.put("inativo", inativo(u, dias));
+        return m;
+    }
 
     @GetMapping("/admin/usuarios")
     public ResponseEntity<?> listarUsuarios() {
+        int dias = diasInatividade();
         List<Map<String, Object>> result = usuarioRepo.findByTipoUsuario(TipoUsuario.CLIENTE).stream().map(u -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", u.getId());
-            m.put("nome", u.getNomeCompleto());
-            m.put("email", u.getEmail());
+            Map<String, Object> m = resumo(u, dias);
             Anamnese a = anamneseRepo.findByClienteId(u.getId());
             if (a != null && a.getPeso() != null && a.getAltura() != null && a.getAltura() > 0) {
                 double alturaM = a.getAltura() / 100.0;
@@ -64,13 +98,10 @@ public class AdminController {
 
     @GetMapping("/admin/nutricionistas")
     public ResponseEntity<?> listarNutricionistas() {
+        int dias = diasInatividade();
         List<Map<String, Object>> result = usuarioRepo.findByTipoUsuario(TipoUsuario.NUTRICIONISTA).stream().map(u -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", u.getId());
-            m.put("nome", u.getNomeCompleto());
-            m.put("email", u.getEmail());
+            Map<String, Object> m = resumo(u, dias);
             m.put("crn", u.getCrn());
-            m.put("ativo", u.isCodStatus());
             List<Avaliacao> avs = avaliacaoRepo.findByNutricionistaId(u.getId());
             double media = avs.stream().mapToInt(Avaliacao::getNota).average().orElse(0);
             m.put("mediaAvaliacoes", avs.isEmpty() ? null : Math.round(media * 10.0) / 10.0);
@@ -81,14 +112,16 @@ public class AdminController {
 
     @GetMapping("/admin/crescimento")
     public ResponseEntity<?> crescimento() {
-        long total = usuarioRepo.count();
+        // Total acumulado de pacientes + nutricionistas ao fim de cada um dos últimos 6 meses
+        List<Usuario> todos = usuarioRepo.findAll().stream().filter(u -> u.getTipoUsuario() != TipoUsuario.ADMIN).toList();
         YearMonth now = YearMonth.now();
         List<Map<String, Object>> data = new ArrayList<>();
         for (int i = 5; i >= 0; i--) {
             YearMonth ym = now.minusMonths(i);
+            LocalDateTime fim = ym.plusMonths(1).atDay(1).atStartOfDay();
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("month", ym.getMonth().getDisplayName(java.time.format.TextStyle.SHORT, new java.util.Locale("pt", "BR")));
-            entry.put("users", i == 0 ? total : Math.max(0, total - i));
+            entry.put("users", todos.stream().filter(u -> u.getDataCadastro() != null && u.getDataCadastro().isBefore(fim)).count());
             data.add(entry);
         }
         return ResponseEntity.ok(data);
@@ -103,15 +136,24 @@ public class AdminController {
 
     @GetMapping("/admin/configuracoes")
     public ResponseEntity<?> getConfiguracoes() {
-        return ResponseEntity.ok(Map.of("diasInatividade", diasInatividade));
+        return ResponseEntity.ok(Map.of("diasInatividade", diasInatividade()));
     }
 
     @PutMapping("/admin/configuracoes")
     public ResponseEntity<?> salvarConfiguracoes(@RequestBody Map<String, Object> body) {
-        if (body.containsKey("diasInatividade")) {
-            diasInatividade = Integer.parseInt(body.get("diasInatividade").toString());
+        int dias;
+        try {
+            dias = Integer.parseInt(String.valueOf(body.get("diasInatividade")));
+        } catch (NumberFormatException e) {
+            throw new BadRequest("Informe um número de dias válido.");
         }
-        return ResponseEntity.ok(Map.of("diasInatividade", diasInatividade, "message", "ConfiguraÃ§Ãµes salvas."));
+        if (dias < 1 || dias > 3650) throw new BadRequest("Dias de inatividade deve ficar entre 1 e 3650.");
+        Configuracao c = new Configuracao();
+        c.setChave(CFG_DIAS_INATIVIDADE);
+        c.setValor(String.valueOf(dias));
+        configRepo.save(c);
+        auditoria.registrar("Configuração alterada: inatividade = " + dias + " dias");
+        return ResponseEntity.ok(Map.of("diasInatividade", dias, "message", "Configurações salvas."));
     }
 
     @GetMapping("/admin/perfil/{id}")
@@ -126,6 +168,75 @@ public class AdminController {
             .orElse(ResponseEntity.notFound().build());
     }
 
+    /** Edita o próprio perfil do admin logado. Trocar a senha exige a senha atual. */
+    @PutMapping("/admin/perfil")
+    public ResponseEntity<?> atualizarPerfil(@RequestBody Map<String, String> body) {
+        Admin admin = adminRepo.findById(atual().getId()).orElseThrow(() -> new BadRequest("Admin não encontrado."));
+        String nome = body.get("nome") == null ? "" : body.get("nome").trim();
+        if (nome.isEmpty() || nome.length() > 100) throw new BadRequest("Nome é obrigatório (máx. 100 caracteres).");
+        admin.setNomeCompleto(nome);
+        admin.setTelefone(body.get("telefone"));
+        String nova = body.get("novaSenha");
+        if (nova != null && !nova.isEmpty()) {
+            if (nova.length() < 6) throw new BadRequest("A nova senha deve ter ao menos 6 caracteres.");
+            if (!encoder.matches(String.valueOf(body.get("senhaAtual")), admin.getSenha()))
+                throw new BadRequest("Senha atual incorreta.");
+            admin.setSenha(encoder.encode(nova));
+        }
+        adminRepo.save(admin);
+        auditoria.registrar("Perfil de administrador atualizado");
+        return ResponseEntity.ok(Map.of("nome", admin.getNomeCompleto(), "telefone", admin.getTelefone() == null ? "" : admin.getTelefone()));
+    }
+
+    // ── Funcionários (admins) ─────────────────────────────────────────
+    @GetMapping("/admin/funcionarios")
+    public ResponseEntity<?> listarFuncionarios() {
+        int dias = diasInatividade();
+        return ResponseEntity.ok(adminRepo.findAll().stream().map(a -> {
+            Map<String, Object> m = resumo(a, dias);
+            m.put("principal", a.isPrincipal());
+            m.put("aprovado", a.isAprovado());
+            return m;
+        }).collect(Collectors.toList()));
+    }
+
+    /** Admin cadastra novo funcionário/admin: já nasce ativo e aprovado. */
+    @PostMapping("/admin/funcionarios")
+    public ResponseEntity<?> cadastrarFuncionario(@RequestBody Map<String, String> body) {
+        String nome = body.getOrDefault("nome", "").trim();
+        String email = body.getOrDefault("email", "").trim().toLowerCase();
+        String senha = body.getOrDefault("senha", "");
+        if (nome.isEmpty() || nome.length() > 100) throw new BadRequest("Nome é obrigatório (máx. 100 caracteres).");
+        if (!email.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$") || email.length() > 100) throw new BadRequest("E-mail inválido.");
+        if (senha.length() < 6) throw new BadRequest("A senha deve ter ao menos 6 caracteres.");
+        if (usuarioRepo.findByEmail(email).isPresent()) throw new BadRequest("E-mail já cadastrado.");
+
+        Admin novo = new Admin();
+        novo.setNomeCompleto(nome);
+        novo.setEmail(email);
+        novo.setTelefone(body.get("telefone"));
+        novo.setSenha(encoder.encode(senha));
+        novo.setCodStatus(true);
+        novo.setAprovado(true);
+        Admin salvo = adminRepo.save(novo);
+        auditoria.registrar("Cadastro de funcionário/admin: " + nome);
+        return ResponseEntity.ok(Map.of("id", salvo.getId(), "nome", salvo.getNomeCompleto(), "email", salvo.getEmail()));
+    }
+
+    /** Ativa/desativa qualquer conta (paciente, nutricionista ou admin), exceto a própria e o admin principal. */
+    @PutMapping("/admin/usuarios/{id}/status")
+    public ResponseEntity<?> alterarStatus(@PathVariable Long id, @RequestBody Map<String, Boolean> body) {
+        Usuario u = usuarioRepo.findById(id).orElse(null);
+        if (u == null) return ResponseEntity.notFound().build();
+        boolean ativo = Boolean.TRUE.equals(body.get("ativo"));
+        if (u.getId().equals(atual().getId())) throw new BadRequest("Você não pode alterar o status da própria conta.");
+        if (u instanceof Admin a && a.isPrincipal()) throw new BadRequest("O administrador principal não pode ser desativado.");
+        u.setCodStatus(ativo);
+        usuarioRepo.save(u);
+        auditoria.registrar((ativo ? "Ativou" : "Desativou") + " a conta de " + u.getNomeCompleto());
+        return ResponseEntity.ok(Map.of("id", u.getId(), "ativo", ativo));
+    }
+
     @GetMapping("/admin/pendentes")
     public List<Admin> listarAdminsPendentes() {
         return adminRepo.findByAprovadoFalse();
@@ -136,6 +247,7 @@ public class AdminController {
         return adminRepo.findById(id).map(a -> {
             a.setAprovado(true);
             adminRepo.save(a);
+            auditoria.registrar("Aprovou o admin " + a.getNomeCompleto());
             return ResponseEntity.ok(Map.of("message", "Admin aprovado."));
         }).orElse(ResponseEntity.notFound().build());
     }
@@ -175,6 +287,12 @@ public class AdminController {
 
     @PostMapping("/avaliacoes")
     public ResponseEntity<?> salvarAvaliacao(@RequestBody Avaliacao avaliacao) {
+        authz.check(avaliacao.getCliente() != null ? avaliacao.getCliente().getId() : null);
+        if (avaliacao.getNutricionista() == null || avaliacao.getNutricionista().getId() == null
+                || avaliacao.getNota() == null || avaliacao.getNota() < 1 || avaliacao.getNota() > 5) {
+            throw new BadRequest("Nutricionista e nota (1 a 5) são obrigatórios.");
+        }
+        avaliacao.setId(null);
         avaliacao.setDataAvaliacao(java.time.LocalDate.now());
         Avaliacao salva = avaliacaoRepo.save(avaliacao);
         Map<String, Object> resp = new LinkedHashMap<>();
@@ -223,12 +341,14 @@ public class AdminController {
             .orElse(ResponseEntity.notFound().build());
     }
 
+    @PreAuthorize("@authz.self(#id)")
     @PostMapping("/nutricionistas/{id}/perfil")
     public ResponseEntity<?> salvarPerfil(@PathVariable Long id, @RequestBody NutricionistaPerfil perfil) {
         return usuarioRepo.findById(id).map(u -> {
             var existente = nutriPerfilRepo.findByNutricionistaId(id);
             NutricionistaPerfil p = existente.orElseGet(NutricionistaPerfil::new);
-            if (!existente.isPresent()) p.setNutricionista((Nutricionista) u);
+            if (!(u instanceof Nutricionista nutri)) return ResponseEntity.badRequest().body((Object) Map.of("message", "Usuário não é nutricionista."));
+            if (!existente.isPresent()) p.setNutricionista(nutri);
             if (perfil.getEspecialidade() != null) p.setEspecialidade(perfil.getEspecialidade());
             if (perfil.getBio()           != null) p.setBio(perfil.getBio());
             if (perfil.getWhatsapp()      != null) p.setWhatsapp(perfil.getWhatsapp());
@@ -256,50 +376,83 @@ public class AdminController {
 
     @GetMapping("/admin/alimentos")
     public List<Alimento> listarAlimentos() {
-        return alimentoRepo.findAll();
+        // Catálogo: exclui itens de planos alimentares (refeicao) e alimentos customizados de pacientes
+        return alimentoRepo.findByCustomizadoFalseAndRefeicaoIsNull();
+    }
+
+    private void validarAlimento(Alimento a) {
+        if (a.getNome() == null || a.getNome().isBlank()) throw new BadRequest("Nome do alimento é obrigatório.");
+        for (Double v : new Double[]{a.getCalorias(), a.getProteina(), a.getCarboidrato(), a.getGordura()}) {
+            if (v == null || v < 0) throw new BadRequest("Valores nutricionais devem ser números maiores ou iguais a zero.");
+        }
     }
 
     @PostMapping("/admin/alimentos")
     public ResponseEntity<?> criarAlimento(@RequestBody Alimento alimento) {
-        return ResponseEntity.ok(alimentoRepo.save(alimento));
+        validarAlimento(alimento);
+        alimento.setId(null);
+        alimento.setRefeicao(null);
+        alimento.setClienteId(null);
+        alimento.setCustomizado(false);
+        Alimento salvo = alimentoRepo.save(alimento);
+        auditoria.registrar("Adicionou o alimento " + salvo.getNome());
+        return ResponseEntity.ok(salvo);
     }
 
     @PutMapping("/admin/alimentos/{id}")
     public ResponseEntity<?> atualizarAlimento(@PathVariable Long id, @RequestBody Alimento dados) {
-        return alimentoRepo.findById(id).map(a -> {
+        validarAlimento(dados);
+        return alimentoRepo.findById(id).filter(a -> a.getRefeicao() == null && !a.isCustomizado()).map(a -> {
             a.setNome(dados.getNome());
             a.setCalorias(dados.getCalorias());
             a.setProteina(dados.getProteina());
             a.setCarboidrato(dados.getCarboidrato());
             a.setGordura(dados.getGordura());
+            a.setAtivo(dados.isAtivo());
+            auditoria.registrar("Editou o alimento " + a.getNome());
             return ResponseEntity.ok(alimentoRepo.save(a));
         }).orElse(ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/admin/alimentos/{id}")
     public ResponseEntity<?> removerAlimento(@PathVariable Long id) {
-        if (!alimentoRepo.existsById(id)) return ResponseEntity.notFound().build();
-        alimentoRepo.deleteById(id);
-        return ResponseEntity.ok(Map.of("message", "Removido."));
+        return alimentoRepo.findById(id).filter(a -> a.getRefeicao() == null && !a.isCustomizado()).map(a -> {
+            // se o gerador de planos tem regra para o alimento, apagar não o tira dos planos: só desativar
+            if (CatalogoSeed.CATEGORIA_PLANO.equals(a.getCategoria()))
+                throw new BadRequest("Este alimento é usado na geração dos planos. Desative-o em vez de removê-lo.");
+            alimentoRepo.delete(a);
+            auditoria.registrar("Removeu o alimento " + a.getNome());
+            return ResponseEntity.ok((Object) Map.of("message", "Removido."));
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/admin/stats")
     public ResponseEntity<?> stats() {
+        List<Usuario> nutris = usuarioRepo.findByTipoUsuario(TipoUsuario.NUTRICIONISTA);
         long totalPacientes      = usuarioRepo.countByTipoUsuario(TipoUsuario.CLIENTE);
-        long totalNutricionistas = usuarioRepo.countByTipoUsuario(TipoUsuario.NUTRICIONISTA);
-        long totalCadastros      = totalPacientes + totalNutricionistas;
-        long totalLogs           = logRepo.count();
+        long totalNutricionistas = nutris.size();
+        long nutricionistasAtivos = nutris.stream().filter(Usuario::isCodStatus).count();
+        int dias = diasInatividade();
+        long inativos = usuarioRepo.findAll().stream()
+            .filter(u -> u.getTipoUsuario() != TipoUsuario.ADMIN && inativo(u, dias)).count();
 
         List<Avaliacao> todasAvaliacoes = avaliacaoRepo.findAll();
         double mediaGeral = todasAvaliacoes.stream().mapToInt(Avaliacao::getNota).average().orElse(0);
 
-        return ResponseEntity.ok(Map.of(
-            "totalPacientes",      totalPacientes,
-            "totalNutricionistas", totalNutricionistas,
-            "totalCadastros",      totalCadastros,
-            "totalLogs",           totalLogs,
-            "mediaAvaliacoes",     todasAvaliacoes.isEmpty() ? null : Math.round(mediaGeral * 10.0) / 10.0
-        ));
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("totalPacientes",        totalPacientes);
+        m.put("totalNutricionistas",   totalNutricionistas);
+        m.put("nutricionistasAtivos",  nutricionistasAtivos);
+        m.put("nutricionistasPendentes", totalNutricionistas - nutricionistasAtivos);
+        m.put("totalCadastros",        totalPacientes + totalNutricionistas);
+        m.put("usuariosInativos",      inativos);
+        m.put("diasInatividade",       dias);
+        m.put("totalConsultas",        consultaRepo.count());
+        m.put("totalAlimentos",        alimentoRepo.findByCustomizadoFalseAndRefeicaoIsNull().size());
+        m.put("totalAdmins",           adminRepo.count());
+        m.put("totalLogs",             logRepo.count());
+        m.put("mediaAvaliacoes",       todasAvaliacoes.isEmpty() ? null : Math.round(mediaGeral * 10.0) / 10.0);
+        return ResponseEntity.ok(m);
     }
 }
 

@@ -26,7 +26,9 @@ CREATE TABLE Usuario (
     crn              VARCHAR(20)    NULL,
     especialidade    VARCHAR(100)   NULL,
     aprovado         BIT            NOT NULL DEFAULT 0,
-    principal        BIT            NOT NULL DEFAULT 0
+    principal        BIT            NOT NULL DEFAULT 0,
+    data_cadastro    DATETIME2      NOT NULL DEFAULT SYSDATETIME(),
+    ultimo_acesso    DATETIME2      NULL
 );
 GO
 
@@ -109,7 +111,8 @@ CREATE TABLE Alimento (
     carboidrato FLOAT        NULL,
     gordura     FLOAT        NULL,
     customizado BIT          NOT NULL DEFAULT 0,
-    categoria   VARCHAR(50)  NULL
+    categoria   VARCHAR(50)  NULL,
+    ativo       BIT          NOT NULL DEFAULT 1
 );
 GO
 
@@ -159,15 +162,27 @@ CREATE TABLE Log_Atividade (
 );
 GO
 
+CREATE TABLE Configuracao (
+    chave VARCHAR(50)  NOT NULL PRIMARY KEY,
+    valor VARCHAR(255) NOT NULL
+);
+GO
+
+INSERT INTO Configuracao VALUES ('diasInatividade', '30');
+GO
+
 CREATE TABLE tokens (
     id BIGINT NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    token VARCHAR(255) NULL,
+    token VARCHAR(1000) NULL,
     revoked BIT NOT NULL,
     expired BIT NOT NULL,
     token_type VARCHAR(255) NULL,
     usuario_id BIGINT NULL,
     CONSTRAINT fk_tokens_usuario_id FOREIGN KEY (usuario_id) REFERENCES Usuario(id)
 );
+GO
+
+CREATE INDEX ix_tokens_token ON tokens(token);
 GO
 
 -- Admin padrão (senha: admin123)

@@ -26,8 +26,6 @@ public class JwtService {
     private String secretKey;
     @Value("${application.security.jwt.expiration}")
     private long jwtExpiration;
-    @Value("${application.security.jwt.refresh-token.expiration}")
-    private long refreshExpiration;
 
     private Key getSignInKey() {
         byte[] keyBytes = Decoders.BASE64.decode(secretKey);
@@ -67,6 +65,7 @@ public class JwtService {
 
         return Jwts.builder()
                 .setClaims(extraClaims)
+                .setId(java.util.UUID.randomUUID().toString()) // jti: dois logins no mesmo segundo não podem gerar o mesmo token
                 .setSubject(userDetails.getUsername())
                 .setIssuedAt(Date.from(agora.toInstant()))
                 .setExpiration(Date.from(expira.toInstant()))
@@ -87,10 +86,6 @@ public class JwtService {
             extraClaims.put("nome", usuario.getNome());
         }
         return buildToken(extraClaims, userDetails, jwtExpiration);
-    }
-
-    public String generateRefreshToken(UserDetails userDetails) {
-        return buildToken(new HashMap<>(), userDetails, refreshExpiration);
     }
 
     private boolean isTokenExpired(String token) {

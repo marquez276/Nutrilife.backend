@@ -7,6 +7,7 @@ import com.itb.inf3an.nutrilife.model.repository.UsuarioRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -14,18 +15,18 @@ import java.io.IOException;
 import java.util.Map;
 
 @RestController
-@CrossOrigin(origins = "*")
 public class NutricionistaController {
 
     @Autowired private NutriPerfilRepository perfilRepo;
     @Autowired private UsuarioRepository usuarioRepo;
 
     /** POST /nutricionistas/{id}/portfolio â€” appends one image (Base64 data URL) to the portfolio list */
+    @PreAuthorize("@authz.self(#id)")
     @PostMapping("/nutricionistas/{id}/portfolio")
     public ResponseEntity<?> uploadPortfolio(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
         return usuarioRepo.findById(id).map(u -> {
             if (!(u instanceof Nutricionista nutri)) {
-                return ResponseEntity.badRequest().body(Map.of("message", "UsuÃ¡rio nÃ£o Ã© nutricionista."));
+                return ResponseEntity.badRequest().body(Map.of("message", "Usuário não é nutricionista."));
             }
             try {
                 String mime = file.getContentType() != null ? file.getContentType() : "image/jpeg";

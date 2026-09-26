@@ -1,130 +1,91 @@
 package com.itb.inf3an.nutrilife.auth;
 
-import tools.jackson.databind.ObjectMapper;
 import com.itb.inf3an.nutrilife.dto.auth.AuthenticationRequest;
 import com.itb.inf3an.nutrilife.dto.auth.AuthenticationResponse;
-import com.itb.inf3an.nutrilife.dto.auth.RegisterRequest;
 import com.itb.inf3an.nutrilife.exceptions.BadRequest;
 import com.itb.inf3an.nutrilife.exceptions.Unauthorized;
+import com.itb.inf3an.nutrilife.model.entity.Admin;
 import com.itb.inf3an.nutrilife.model.entity.Nutricionista;
 import com.itb.inf3an.nutrilife.model.entity.Usuario;
-import com.itb.inf3an.nutrilife.model.enums.TipoUsuario;
 import com.itb.inf3an.nutrilife.model.repository.UsuarioRepository;
+import com.itb.inf3an.nutrilife.model.services.Auditoria;
 import com.itb.inf3an.nutrilife.security.jwt.JwtService;
 import com.itb.inf3an.nutrilife.security.token.Token;
 import com.itb.inf3an.nutrilife.security.token.TokenRepository;
 import com.itb.inf3an.nutrilife.security.token.TokenType;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-
 @Service
 public class AuthenticationService {
+
+    private static final String CREDENCIAIS_INVALIDAS = "E-mail ou senha inválidos.";
 
     private final UsuarioRepository repository;
     private final TokenRepository tokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
+    private final Auditoria auditoria;
 
     public AuthenticationService(
             UsuarioRepository repository,
             TokenRepository tokenRepository,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
-            AuthenticationManager authenticationManager) {
+            AuthenticationManager authenticationManager,
+            Auditoria auditoria) {
         this.repository = repository;
         this.tokenRepository = tokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.authenticationManager = authenticationManager;
-    }
-
-    public AuthenticationResponse register(RegisterRequest request) {
-        if (request.getEmail() == null || request.getEmail().isBlank()) {
-            throw new BadRequest("E-mail é obrigatório");
-        }
-        if (request.getPassword() == null || request.getPassword().isBlank()) {
-            throw new BadRequest("Senha é obrigatória");
-        }
-        if (request.getTipoUsuario() == null) {
-            request.setTipoUsuario(TipoUsuario.CLIENTE);
-        }
-
-        var usuarioDb = repository.findByEmail(request.getEmail());
-        if (usuarioDb.isPresent()) {
-            throw new BadRequest("Já existe este email cadastrado em nossa base de dados");
-        }
-
-        String nomeClasse = String.valueOf(request.getTipoUsuario());
-        nomeClasse = nomeClasse.toLowerCase();
-        char primeiroCharMaiusculo = Character.toUpperCase(nomeClasse.charAt(0));
-        nomeClasse = primeiroCharMaiusculo + nomeClasse.substring(1);
-
-        try {
-            Class<?> myClass = Class.forName("com.itb.inf3an.nutrilife.model.entity." + nomeClasse);
-            Usuario usuario = (Usuario) myClass.getDeclaredConstructor().newInstance();
-
-            usuario.setCodStatus(true);
-            usuario.setNomeCompleto(request.getNome());
-            usuario.setEmail(request.getEmail());
-            usuario.setSenha(passwordEncoder.encode(request.getPassword()));
-            usuario.setTipoUsuario(request.getTipoUsuario());
-            usuario.setCpf(request.getCpf());
-            usuario.setTelefone(request.getTelefone());
-            usuario.setDataNascimento(request.getDataNascimento());
-
-            if (usuario instanceof Nutricionista nutri) {
-                nutri.setCrn(request.getCrn());
-                nutri.setEspecialidade(request.getEspecialidade());
-                nutri.setCodStatus(true);
-            }
-
-            var savedUser = repository.save(usuario);
-            var jwtToken = jwtService.generateToken(savedUser);
-            var refreshToken = jwtService.generateRefreshToken(savedUser);
-
-            saveUserToken(savedUser, jwtToken);
-            return new AuthenticationResponse(jwtToken, refreshToken);
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException("Erro ao cadastrar usuário: " + e.getMessage());
-        }
+        this.auditoria = auditoria;
     }
 
     public AuthenticationResponse authenticate(AuthenticationRequest request) {
-        try {
-            authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(
-                            request.getEmail(),
-                            request.getPassword()
-                    )
-            );
-        } catch (Exception e) {
-            e.printStackTrace();
-            throw new BadRequest("Email ou Senha Incorreto");
+        if (request.getEmail() == null || request.getEmail().isBlank()
+                || request.getPassword() == null || request.getPassword().isBlank()) {
+            throw new BadRequest("E-mail e senha são obrigatórios.");
         }
 
         var user = repository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new BadRequest("Email ou Senha Incorreto"));
+                .orElseThrow(() -> new Unauthorized(CREDENCIAIS_INVALIDAS));
 
-        if (!user.isCodStatus()) {
-            throw new Unauthorized("Conta inativa, por favor procurar o administrador da conta");
+        // Migra senha legada em texto puro para BCrypt antes de autenticar
+        if (!user.getSenha().startsWith("$2") && user.getSenha().equals(request.getPassword())) {
+            user.setSenha(passwordEncoder.encode(request.getPassword()));
+            user = repository.save(user);
         }
 
-        var jwtToken = jwtService.generateToken(user);
-        var refreshToken = jwtService.generateRefreshToken(user);
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword()));
+        } catch (AuthenticationException e) {
+            auditoria.registrar(user.getNomeCompleto(), "Tentativa de login com senha incorreta", "Falha");
+            throw new Unauthorized(CREDENCIAIS_INVALIDAS);
+        }
+
+        // Nutricionista com cadastro pendente (cod_status = false) pode entrar; os demais precisam estar ativos
+        if (!user.isCodStatus() && !(user instanceof Nutricionista)) {
+            throw new Unauthorized("Conta inativa, por favor procurar o administrador da conta");
+        }
+        if (user instanceof Admin admin && !admin.isAprovado()) {
+            throw new Unauthorized("Administrador ainda não aprovado.");
+        }
+
+        user.setUltimoAcesso(java.time.LocalDateTime.now());
+        user = repository.save(user);
+        auditoria.registrar(user.getNomeCompleto(), "Login realizado (" + user.getTipoUsuario() + ")", "Sucesso");
+
         revokeAllUserTokens(user);
+        var jwtToken = jwtService.generateToken(user);
         saveUserToken(user, jwtToken);
 
-        return new AuthenticationResponse(jwtToken, refreshToken);
+        return new AuthenticationResponse(jwtToken, user);
     }
 
     private void saveUserToken(Usuario usuario, String jwtToken) {
@@ -146,30 +107,5 @@ public class AuthenticationService {
             token.setRevoked(true);
         });
         tokenRepository.saveAll(validUserTokens);
-    }
-
-    public void refreshToken(
-            HttpServletRequest request,
-            HttpServletResponse response
-    ) throws IOException {
-        final String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
-        final String refreshToken;
-        final String userEmail;
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            return;
-        }
-        refreshToken = authHeader.substring(7);
-        userEmail = jwtService.extractUsername(refreshToken);
-        if (userEmail != null) {
-            var user = this.repository.findByEmail(userEmail)
-                    .orElseThrow();
-            if (jwtService.isTokenValid(refreshToken, user)) {
-                var accessToken = jwtService.generateToken(user);
-                revokeAllUserTokens(user);
-                saveUserToken(user, accessToken);
-                var authResponse = new AuthenticationResponse(accessToken, refreshToken);
-                new ObjectMapper().writeValue(response.getOutputStream(), authResponse);
-            }
-        }
     }
 }

@@ -21,5 +21,9 @@ public class ErrorMessage {
         this.title = title;
         this.status = title.value();
     }
-}
 
+    /** Campo único "message", que é o que o frontend lê. */
+    public String getMessage() {
+        return String.join("; ", messages);
+    }
+}

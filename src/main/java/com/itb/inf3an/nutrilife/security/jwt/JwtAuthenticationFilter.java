@@ -2,6 +2,7 @@ package com.itb.inf3an.nutrilife.security.jwt;
 
 import com.itb.inf3an.nutrilife.model.entity.Usuario;
 import com.itb.inf3an.nutrilife.security.token.TokenRepository;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -10,6 +11,7 @@ import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -36,39 +38,38 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			@NonNull FilterChain filterChain
 	) throws ServletException, IOException {
 		final String authHeader = request.getHeader("Authorization");
-		final String token;
-		final String userEmail;
 		if (authHeader == null || !authHeader.startsWith("Bearer ")) {
 			filterChain.doFilter(request, response);
 			return;
 		}
-		token = authHeader.substring(7);
-		userEmail = jwtService.extractUsername(token);
-		if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-			Usuario userDetails = (Usuario) this.userDetailsService.loadUserByUsername(userEmail);
+		final String token = authHeader.substring(7).trim();
 
-			var isTokenValid = tokenRepository.findByToken(token)
-					.map(t ->
-							!t.isExpired() &&
-									!t.isRevoked() &&
-									t.getUsuario() != null &&
-									t.getUsuario().getEmail().equals(userDetails.getEmail())
-					)
-					.orElse(false);
+		// Token expirado, malformado, com assinatura errada ou de usuário removido: segue sem autenticar.
+		// Rotas públicas continuam funcionando e as protegidas respondem 401 pelo AuthenticationEntryPoint.
+		try {
+			final String userEmail = jwtService.extractUsername(token);
+			if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+				Usuario userDetails = (Usuario) this.userDetailsService.loadUserByUsername(userEmail);
 
-			if (jwtService.isTokenValid(token, userDetails) && isTokenValid) {
-				UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-						userDetails,
-						null,
-						userDetails.getAuthorities()
-				);
-				authToken.setDetails(
-						new WebAuthenticationDetailsSource().buildDetails(request)
-				);
-				SecurityContextHolder.getContext().setAuthentication(authToken);
+				var tokenAtivo = tokenRepository.findByToken(token)
+						.map(t -> !t.isExpired() && !t.isRevoked()
+								&& t.getUsuario() != null
+								&& t.getUsuario().getEmail().equals(userDetails.getEmail()))
+						.orElse(false);
+
+				if (tokenAtivo && jwtService.isTokenValid(token, userDetails)) {
+					UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+							userDetails,
+							null,
+							userDetails.getAuthorities()
+					);
+					authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+					SecurityContextHolder.getContext().setAuthentication(authToken);
+				}
 			}
+		} catch (JwtException | IllegalArgumentException | UsernameNotFoundException e) {
+			logger.debug("JWT rejeitado: " + e.getMessage());
 		}
 		filterChain.doFilter(request, response);
 	}
 }
-

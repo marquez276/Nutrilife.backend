@@ -4,6 +4,8 @@ import com.itb.inf3an.nutrilife.model.entity.*;
 import com.itb.inf3an.nutrilife.model.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.itb.inf3an.nutrilife.security.config.Authz;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.slf4j.Logger;
@@ -17,7 +19,6 @@ import java.util.Map;
 import java.util.LinkedHashMap;
 
 @RestController
-@CrossOrigin(origins = "*")
 public class RegistroController {
 
     private static final Logger log = LoggerFactory.getLogger(RegistroController.class);
@@ -35,6 +36,9 @@ public class RegistroController {
     private UsuarioRepository usuarioRepo;
 
     @Autowired
+    private Authz authz;
+
+    @Autowired
     private AnamneseRepository anamneseRepo;
 
     @Autowired
@@ -45,11 +49,13 @@ public class RegistroController {
 
     //  REFEIÃ‡Ã•ES DIÃRIAS 
 
+    @PreAuthorize("@authz.self(#clienteId)")
     @GetMapping("/registros/refeicoes/{clienteId}")
     public List<RegistroRefeicao> listarRefeicoes(@PathVariable Long clienteId) {
         return refeicaoRepo.findByClienteIdAndData(clienteId, LocalDate.now());
     }
 
+    @PreAuthorize("@authz.self(#clienteId)")
     @GetMapping("/registros/refeicoes/{clienteId}/historico")
     public List<RegistroRefeicao> historicoRefeicoes(@PathVariable Long clienteId) {
         return refeicaoRepo.findByClienteId(clienteId);
@@ -57,6 +63,8 @@ public class RegistroController {
 
     @PostMapping("/registros/refeicoes")
     public ResponseEntity<?> salvarRefeicao(@RequestBody RegistroRefeicao refeicao) {
+        authz.check(refeicao.getCliente() != null ? refeicao.getCliente().getId() : null);
+        refeicao.setId(null);
         if (refeicao.getData() == null) refeicao.setData(LocalDate.now());
         return ResponseEntity.ok(refeicaoRepo.save(refeicao));
     }
@@ -64,6 +72,7 @@ public class RegistroController {
     @PutMapping("/registros/refeicoes/{id}")
     public ResponseEntity<?> atualizarRefeicao(@PathVariable Long id, @RequestBody RegistroRefeicao dados) {
         return refeicaoRepo.findById(id).map(r -> {
+            authz.check(r.getCliente() != null ? r.getCliente().getId() : null);
             r.setMeal(dados.getMeal());
             r.setItems(dados.getItems());
             r.setCalories(dados.getCalories());
@@ -74,12 +83,16 @@ public class RegistroController {
 
     @DeleteMapping("/registros/refeicoes/{id}")
     public ResponseEntity<?> deletarRefeicao(@PathVariable Long id) {
-        refeicaoRepo.deleteById(id);
-        return ResponseEntity.ok().build();
+        return refeicaoRepo.findById(id).map(r -> {
+            authz.check(r.getCliente() != null ? r.getCliente().getId() : null);
+            refeicaoRepo.deleteById(id);
+            return ResponseEntity.ok().build();
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     // PESAGENS 
 
+    @PreAuthorize("@authz.self(#clienteId)")
     @GetMapping("/registros/pesagens/{clienteId}")
     public List<Pesagem> listarPesagens(@PathVariable Long clienteId) {
         return pesagemRepo.findByClienteIdOrderByDataAsc(clienteId);
@@ -87,6 +100,8 @@ public class RegistroController {
 
     @PostMapping("/registros/pesagens")
     public ResponseEntity<?> salvarPesagem(@RequestBody Pesagem pesagem) {
+        authz.check(pesagem.getCliente() != null ? pesagem.getCliente().getId() : null);
+        pesagem.setId(null);
         if (pesagem.getData() == null) pesagem.setData(LocalDate.now());
         Pesagem salva = pesagemRepo.save(pesagem);
         if (salva.getCliente() != null) recalcularMetas(salva.getCliente().getId());
@@ -97,12 +112,14 @@ public class RegistroController {
     public ResponseEntity<?> removerPesagem(@PathVariable Long id) {
         return pesagemRepo.findById(id).map(p -> {
             Long clienteId = p.getCliente() != null ? p.getCliente().getId() : null;
+            authz.check(clienteId);
             pesagemRepo.deleteById(id);
             if (clienteId != null) recalcularMetas(clienteId);
             return ResponseEntity.ok().build();
         }).orElse(ResponseEntity.notFound().build());
     }
 
+    @PreAuthorize("@authz.self(#clienteId)")
     @GetMapping("/clientes/{clienteId}/progresso")
     public ResponseEntity<?> getProgresso(@PathVariable Long clienteId) {
         List<Pesagem> historico = pesagemRepo.findByClienteIdOrderByDataAsc(clienteId);
@@ -133,8 +150,9 @@ public class RegistroController {
         return ResponseEntity.ok(result);
     }
 
-    // ATUALIZAR USUÃRIO
+    // ATUALIZAR USUÁRIO
 
+    @PreAuthorize("@authz.self(#id)")
     @PutMapping("/usuarios/{id}")
     public ResponseEntity<?> atualizarUsuario(@PathVariable Long id, @RequestBody Map<String, String> dados) {
         return usuarioRepo.findById(id).map(u -> {
@@ -147,6 +165,7 @@ public class RegistroController {
 
     // UPLOAD DE IMAGEM
 
+    @PreAuthorize("@authz.self(#id)")
     @PostMapping("/usuarios/{id}/imagem")
     public ResponseEntity<?> uploadImagem(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
         return usuarioRepo.findById(id).map(u -> {
@@ -162,6 +181,7 @@ public class RegistroController {
 
     // METAS CALCULADAS
 
+    @PreAuthorize("@authz.self(#clienteId)")
     @GetMapping("/anamnese/cliente/{clienteId}/metas")
     public ResponseEntity<?> calcularMetas(@PathVariable Long clienteId) {
         Anamnese a = anamneseRepo.findByClienteId(clienteId);
@@ -181,6 +201,7 @@ public class RegistroController {
 
     // ATUALIZAR ANAMNESE
 
+    @PreAuthorize("@authz.self(#clienteId)")
     @GetMapping("/anamnese/cliente/{clienteId}")
     public ResponseEntity<?> buscarAnamnese(@PathVariable Long clienteId) {
         Anamnese a = anamneseRepo.findByClienteId(clienteId);
@@ -191,6 +212,7 @@ public class RegistroController {
     @PutMapping("/anamnese/{id}")
     public ResponseEntity<?> atualizarAnamnese(@PathVariable Long id, @RequestBody Anamnese dados) {
         return anamneseRepo.findById(id).map(a -> {
+            authz.check(a.getCliente().getId());
             if (dados.getPeso()          != null) a.setPeso(dados.getPeso());
             if (dados.getAltura()        != null) a.setAltura(dados.getAltura());
             if (dados.getSexo()          != null) a.setSexo(dados.getSexo());
@@ -205,7 +227,7 @@ public class RegistroController {
             planoRepo.findTopByClienteIdOrderByDataInicioDesc(clienteId).ifPresent(plano -> {
                 plano.setAnamneseHash(null);
                 planoRepo.save(plano);
-                log.info("Hash do plano invalidado para clienteId={} apÃ³s atualizaÃ§Ã£o de anamnese", clienteId);
+                log.info("Hash do plano invalidado para clienteId={} após atualização de anamnese", clienteId);
             });
             return ResponseEntity.ok(salva);
         }).orElse(ResponseEntity.notFound().build());
@@ -268,14 +290,15 @@ public class RegistroController {
     }
 
     // PRONTUÃRIO - OBSERVAÃ‡Ã•ES CLÃNICAS
-    // Usa o prÃ³prio campo observations da Consulta para guardar notas por paciente.
+    // Usa o próprio campo observations da Consulta para guardar notas por paciente.
     // Endpoint dedicado: GET/POST /prontuario/{nutricionistaId}/{pacienteNome}
 
+    @PreAuthorize("@authz.self(#nutricionistaId)")
     @GetMapping("/prontuario/{nutricionistaId}/{pacienteNome}")
     public ResponseEntity<?> buscarProntuario(
             @PathVariable Long nutricionistaId,
             @PathVariable String pacienteNome) {
-        // Busca a consulta mais recente deste nutricionista para este paciente que tenha observaÃ§Ãµes
+        // Busca a consulta mais recente deste nutricionista para este paciente que tenha observações
         return consultaRepo.findByNutricionistaId(nutricionistaId).stream()
             .filter(c -> pacienteNome.equalsIgnoreCase(c.getPacienteNome()) && c.getObservations() != null)
             .max(java.util.Comparator.comparing(c -> c.getDataConsulta() != null ? c.getDataConsulta() : java.time.LocalDate.MIN))
@@ -288,12 +311,13 @@ public class RegistroController {
 
     @PostMapping("/prontuario")
     public ResponseEntity<?> salvarProntuario(@RequestBody Map<String, Object> body) {
-        // Cria ou atualiza uma consulta de prontuÃ¡rio (sem data/hora, sÃ³ observaÃ§Ãµes)
+        // Cria ou atualiza uma consulta de prontuário (sem data/hora, só observações)
+        authz.check(body.get("nutricionistaId") != null ? Long.parseLong(body.get("nutricionistaId").toString()) : null);
         Long consultaId = body.containsKey("consultaId") && body.get("consultaId") != null
             ? Long.parseLong(body.get("consultaId").toString()) : null;
 
         Consulta c = consultaId != null && consultaId > 0
-            ? consultaRepo.findById(consultaId).orElse(new Consulta())
+            ? consultaRepo.findById(consultaId).filter(x -> x.getNutricionista() != null && authz.self(x.getNutricionista().getId())).orElse(new Consulta())
             : new Consulta();
 
         if (c.getDataConsulta() == null) c.setDataConsulta(java.time.LocalDate.now());
@@ -311,7 +335,7 @@ public class RegistroController {
         return ResponseEntity.ok(Map.of("id", salva.getId(), "observations", salva.getObservations() != null ? salva.getObservations() : ""));
     }
 
-    // PESAGENS DO PACIENTE (para o nutricionista ver evoluÃ§Ã£o)
+    // PESAGENS DO PACIENTE (para o nutricionista ver evolução)
 
     @PostMapping("/registros/pesagens/nutricionista")
     public ResponseEntity<?> salvarPesagemPaciente(@RequestBody Map<String, Object> body) {
@@ -330,6 +354,7 @@ public class RegistroController {
 
     // METAS SALVAS (leitura sem recalcular)
 
+    @PreAuthorize("@authz.self(#clienteId)")
     @GetMapping("/clientes/{clienteId}/metas")
     public ResponseEntity<?> buscarMetasSalvas(@PathVariable Long clienteId) {
         MetasDiarias m = metasRepo.findByClienteId(clienteId);

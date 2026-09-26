@@ -22,7 +22,7 @@ public class CustomAuthenticationEntryPoint implements AuthenticationEntryPoint 
         var mapper = new ObjectMapper();
         var erro = Map.of(
                 "status", 401,
-                "erro", "Você não está autenticado. Faça login para acessar este recurso."
+                "message", "Você não está autenticado. Faça login para acessar este recurso."
         );
 
         response.getWriter().write(mapper.writeValueAsString(erro));

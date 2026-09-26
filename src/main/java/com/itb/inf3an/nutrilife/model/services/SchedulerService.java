@@ -60,7 +60,7 @@ public class SchedulerService {
                 }
             }
         }
-        log.info("RenovaÃ§Ã£o semanal de planos concluÃ­da: {} planos atualizados", renovados);
+        log.info("Renovação semanal de planos concluída: {} planos atualizados", renovados);
     }
 }
 

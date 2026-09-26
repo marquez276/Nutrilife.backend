@@ -21,7 +21,7 @@ public class CustomAccessDeniedHandler implements AccessDeniedHandler {
         var mapper = new ObjectMapper();
         var erro = Map.of(
                 "status", 403,
-                "erro", "Acesso negado: você não tem permissão para acessar este recurso."
+                "message", "Acesso negado: você não tem permissão para acessar este recurso."
         );
         response.getWriter().write(mapper.writeValueAsString(erro));
     }

@@ -27,16 +27,6 @@ import java.util.List;
 @EnableMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
 
-    private static final String[] WHITE_LIST_URL = {
-            "/api/v1/auth/**",
-            "/auth/**",
-            "/usuarios/**",
-            "/images/**",
-            "/h2-console/**",
-            "/v3/api-docs/**",
-            "/swagger-ui/**"
-    };
-
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final AuthenticationProvider authenticationProvider;
     private final LogoutHandler logoutHandler;
@@ -64,12 +54,15 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(req ->
                         req
-                                .requestMatchers(WHITE_LIST_URL).permitAll()
-                                .requestMatchers(HttpMethod.POST, "/usuarios/paciente", "/usuarios/nutricionista").permitAll()
+                                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                                .requestMatchers(HttpMethod.POST, "/auth/login", "/usuarios/paciente", "/usuarios/nutricionista").permitAll()
                                 .requestMatchers(HttpMethod.GET, "/usuarios/*/imagem").permitAll()
                                 .requestMatchers(HttpMethod.GET, "/nutricionistas/perfis", "/nutricionistas/*/perfil").permitAll()
                                 .requestMatchers(HttpMethod.GET, "/avaliacoes/nutricionista/*").permitAll()
-                                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                                .requestMatchers(HttpMethod.GET, "/admin/verificar-crn").permitAll()
+                                .requestMatchers(HttpMethod.GET, "/admin/alimentos").authenticated()
+                                .requestMatchers("/admin/**").hasRole("ADMIN")
+                                .requestMatchers("/prontuario/**", "/registros/pesagens/nutricionista").hasAnyRole("NUTRICIONISTA", "ADMIN")
                                 .anyRequest().authenticated()
                 )
                 .exceptionHandling(exception -> exception
@@ -80,7 +73,7 @@ public class SecurityConfig {
                 .authenticationProvider(authenticationProvider)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .logout(logout ->
-                        logout.logoutUrl("/api/v1/auth/logout")
+                        logout.logoutUrl("/auth/logout")
                                 .addLogoutHandler(logoutHandler)
                                 .logoutSuccessHandler(
                                         (request, response, authentication) ->

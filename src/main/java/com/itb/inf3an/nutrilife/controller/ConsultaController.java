@@ -4,6 +4,8 @@ import com.itb.inf3an.nutrilife.model.entity.Consulta;
 import com.itb.inf3an.nutrilife.model.repository.ConsultaRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.itb.inf3an.nutrilife.security.config.Authz;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -11,11 +13,13 @@ import java.time.LocalTime;
 import java.util.*;
 
 @RestController
-@CrossOrigin(origins = "*")
 public class ConsultaController {
 
     @Autowired
     private ConsultaRepository consultaRepo;
+
+    @Autowired
+    private Authz authz;
 
     private Map<String, Object> toMap(Consulta c) {
         Map<String, Object> m = new LinkedHashMap<>();
@@ -32,6 +36,7 @@ public class ConsultaController {
         return m;
     }
 
+    @PreAuthorize("@authz.self(#clienteId)")
     @GetMapping("/consultas/cliente/{clienteId}")
     public ResponseEntity<?> porCliente(@PathVariable Long clienteId) {
         List<Map<String, Object>> result = new ArrayList<>();
@@ -39,6 +44,7 @@ public class ConsultaController {
         return ResponseEntity.ok(result);
     }
 
+    @PreAuthorize("@authz.self(#nutricionistaId)")
     @GetMapping("/consultas/nutricionista/{nutricionistaId}")
     public ResponseEntity<?> porNutricionista(@PathVariable Long nutricionistaId) {
         List<Map<String, Object>> result = new ArrayList<>();
@@ -48,6 +54,7 @@ public class ConsultaController {
 
     @PostMapping("/consultas")
     public ResponseEntity<?> criar(@RequestBody Map<String, Object> body) {
+        authz.checkAny(body.get("clienteId"), body.get("nutricionistaId"));
         Consulta c = new Consulta();
         preencherConsulta(c, body);
         c.setCodStatus(true);
@@ -57,6 +64,7 @@ public class ConsultaController {
     @PutMapping("/consultas/{id}")
     public ResponseEntity<?> atualizar(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         return consultaRepo.findById(id).map(c -> {
+            checarDono(c);
             preencherConsulta(c, body);
             return ResponseEntity.ok(toMap(consultaRepo.save(c)));
         }).orElse(ResponseEntity.notFound().build());
@@ -64,9 +72,16 @@ public class ConsultaController {
 
     @DeleteMapping("/consultas/{id}")
     public ResponseEntity<?> remover(@PathVariable Long id) {
-        if (!consultaRepo.existsById(id)) return ResponseEntity.notFound().build();
-        consultaRepo.deleteById(id);
-        return ResponseEntity.ok(Map.of("message", "Consulta removida."));
+        return consultaRepo.findById(id).map(c -> {
+            checarDono(c);
+            consultaRepo.deleteById(id);
+            return ResponseEntity.ok(Map.of("message", "Consulta removida."));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    private void checarDono(Consulta c) {
+        authz.checkAny(c.getCliente() != null ? c.getCliente().getId() : null,
+                       c.getNutricionista() != null ? c.getNutricionista().getId() : null);
     }
 
     private void preencherConsulta(Consulta c, Map<String, Object> body) {
@@ -83,7 +98,7 @@ public class ConsultaController {
         if (body.containsKey("nutritionist"))
             c.setNutricionistaNome(body.get("nutritionist") != null ? body.get("nutritionist").toString() : null);
 
-        // vÃ­nculos opcionais por ID
+        // vínculos opcionais por ID
         if (body.containsKey("clienteId") && body.get("clienteId") != null) {
             var cli = new com.itb.inf3an.nutrilife.model.entity.Cliente();
             cli.setId(Long.parseLong(body.get("clienteId").toString()));

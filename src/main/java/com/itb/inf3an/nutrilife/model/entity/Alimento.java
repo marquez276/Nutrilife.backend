@@ -37,6 +37,13 @@ public class Alimento {
     @Column(name = "categoria", length = 50)
     private String categoria;
 
+    // catálogo: false = admin desativou, o gerador de planos não usa e o paciente não vê
+    @Column(name = "ativo", nullable = false)
+    private boolean ativo = true;
+
+    // só durante a geração do plano: alimento do catálogo desativado
+    @Transient @JsonIgnore private boolean indisponivel;
+
     @ManyToOne
     @JoinColumn(name = "refeicao_id")
     @JsonBackReference("refeicao-alimentos")

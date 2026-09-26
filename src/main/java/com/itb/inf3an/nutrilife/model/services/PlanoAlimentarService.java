@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -25,6 +26,10 @@ public class PlanoAlimentarService {
 
     private final SecureRandom random = new SecureRandom();
 
+    // Catálogo do admin (nome em minúsculas -> alimento), carregado a cada geração de plano.
+    // ThreadLocal porque o serviço é singleton e alimento() é chamado em todo lugar sem contexto.
+    private final ThreadLocal<java.util.Map<String, Alimento>> catalogo = new ThreadLocal<>();
+
 
     public PlanoAlimentar gerarPlano(Long usuarioId) {
         return gerarPlanoInterno(usuarioId, false);
@@ -36,15 +41,15 @@ public class PlanoAlimentarService {
 
     private PlanoAlimentar gerarPlanoInterno(Long usuarioId, boolean forcar) {
         Anamnese anamnese = anamneseRepository.findByClienteId(usuarioId);
-        if (anamnese == null) throw new RuntimeException("Anamnese nÃ£o encontrada para o usuÃ¡rio " + usuarioId);
+        if (anamnese == null) throw new com.itb.inf3an.nutrilife.exceptions.NotFound("Anamnese não encontrada para o usuário " + usuarioId);
 
         Cliente cliente = anamnese.getCliente();
-        if (cliente == null) throw new RuntimeException("Cliente nÃ£o encontrado");
+        if (cliente == null) throw new RuntimeException("Cliente não encontrado");
 
         String hashAtual = gerarHashAnamnese(anamnese);
 
         var planoExistente = planoRepository.findTopByClienteIdOrderByDataInicioDesc(usuarioId);
-        // Reutiliza plano se: mesma anamnese, menos de 7 dias e nÃ£o Ã© forÃ§ado
+        // Reutiliza plano se: mesma anamnese, menos de 7 dias e não é forçado
         if (!forcar && planoExistente.isPresent()) {
             PlanoAlimentar p = planoExistente.get();
             boolean mesmaAnamnese = hashAtual.equals(p.getAnamneseHash());
@@ -66,7 +71,13 @@ public class PlanoAlimentarService {
         log.info("Gerando plano para usuarioId={} | calorias={} | objetivo={} | restricoes={}",
             usuarioId, String.format("%.0f", perfil.calorias), perfil.objetivo, perfil.restricoes);
 
-        montarRefeicoes(plano, perfil);
+        catalogo.set(alimentoRepository.findByCustomizadoFalseAndRefeicaoIsNull().stream()
+            .collect(Collectors.toMap(a -> a.getNome().toLowerCase(), a -> a, (a, b) -> a)));
+        try {
+            montarRefeicoes(plano, perfil);
+        } finally {
+            catalogo.remove();
+        }
 
         return planoRepository.findById(plano.getId()).orElse(plano);
     }
@@ -92,6 +103,11 @@ public class PlanoAlimentarService {
         final boolean diabetes;
         final boolean hipertensao;
         final boolean colesterol;
+        final boolean semAmendoim;
+        final boolean semFrutosMar;
+        final boolean semOvos;
+        final boolean semSoja;
+        final boolean semNozes;
 
         Perfil(Anamnese a) {
             this.calorias   = calcularCalorias(a);
@@ -99,15 +115,39 @@ public class PlanoAlimentarService {
             this.restricoes = a.getRestricoes() != null ? a.getRestricoes().toLowerCase() : "";
             String comorbidades = a.getComorbidades() != null ? a.getComorbidades().toLowerCase() : "";
 
-            this.semLactose   = restricoes.contains("lactose");
-            this.semGluten    = restricoes.contains("glÃºten") || restricoes.contains("gluten");
+            this.semLactose   = restricoes.contains("lactose") || comorbidades.contains("lactose") || restricoes.contains("vegano");
+            this.semGluten    = restricoes.contains("glúten") || restricoes.contains("gluten")
+                             || comorbidades.contains("celíaca") || comorbidades.contains("celiaca");
+            this.semAmendoim  = restricoes.contains("amendoim");
+            this.semFrutosMar = restricoes.contains("frutos do mar");
+            this.semOvos      = restricoes.contains("ovos");
+            this.semSoja      = restricoes.contains("soja");
+            this.semNozes     = restricoes.contains("nozes");
             this.vegano       = restricoes.contains("vegano");
             this.vegetariano  = restricoes.contains("vegetariano") || vegano;
             this.emagrecimento = objetivo.contains("EMAGRECIMENTO");
             this.hipertrofia  = objetivo.contains("HIPERTROFIA");
             this.diabetes     = comorbidades.contains("diabetes");
-            this.hipertensao  = comorbidades.contains("hipertensÃ£o") || comorbidades.contains("hipertensao");
+            this.hipertensao  = comorbidades.contains("hipertensão") || comorbidades.contains("hipertensao");
             this.colesterol   = comorbidades.contains("colesterol");
+        }
+
+        private static final String OVO = ".*(\\bovos?\\b|omelete).*";
+        private static final String PEIXE = ".*(peixe|salmão|atum|sardinha|tilápia|camarão).*";
+
+        /** true se o alimento respeita todas as restrições e comorbidades alimentares do paciente. */
+        boolean permite(Alimento a) {
+            String n = a.getNome() != null ? a.getNome().toLowerCase() : "";
+            return !a.isIndisponivel()
+                && !(semLactose && a.isTemLactose())
+                && !(semGluten && a.isTemGluten())
+                && !(vegano && (a.isTemAnimal() || n.matches(OVO)))
+                && !(vegetariano && (a.isTemCarne() || n.matches(PEIXE)))
+                && !(semOvos && n.matches(OVO))
+                && !(semFrutosMar && n.matches(PEIXE))
+                && !(semAmendoim && n.contains("amendoim"))
+                && !(semSoja && n.matches(".*(tofu|soja).*"))
+                && !(semNozes && n.matches(".*(castanha|nozes?|amêndoa).*"));
         }
 
         private static double calcularCalorias(Anamnese a) {
@@ -131,16 +171,16 @@ public class PlanoAlimentarService {
             if (imc > 30) cal -= 300;
             else if (imc < 18.5) cal += 300;
 
-            return Math.max(cal, 1200); // mÃ­nimo seguro de 1200 kcal
+            return Math.max(cal, 1200); // mínimo seguro de 1200 kcal
         }
     }
 
     // â”€â”€ MONTA AS 4 REFEIÃ‡Ã•ES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private void montarRefeicoes(PlanoAlimentar plano, Perfil p) {
-        // distribuiÃ§Ã£o calÃ³rica: cafÃ© 25%, almoÃ§o 35%, lanche 15%, jantar 25%
-        criarRefeicao("CafÃ© da ManhÃ£", p.calorias * 0.25, plano, p, "cafe");
-        criarRefeicao("AlmoÃ§o",        p.calorias * 0.35, plano, p, "almoco");
+        // distribuição calórica: café 25%, almoço 35%, lanche 15%, jantar 25%
+        criarRefeicao("Café da Manhã", p.calorias * 0.25, plano, p, "cafe");
+        criarRefeicao("Almoço",        p.calorias * 0.35, plano, p, "almoco");
         criarRefeicao("Lanche",        p.calorias * 0.15, plano, p, "lanche");
         criarRefeicao("Jantar",        p.calorias * 0.25, plano, p, "jantar");
     }
@@ -161,18 +201,42 @@ public class PlanoAlimentarService {
     // â”€â”€ MONTAGEM DE ITENS POR REFEIÃ‡ÃƒO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private List<Alimento> montarItens(String tipo, double caloriasAlvo, Perfil p) {
-        return switch (tipo) {
+        return aplicarRestricoes(switch (tipo) {
             case "cafe"   -> montarCafe(p);
             case "almoco" -> montarAlmoco(p);
             case "lanche" -> montarLanche(p);
             case "jantar" -> montarJantar(p);
             default       -> new ArrayList<>();
-        };
+        }, p);
+    }
+
+    /** Rede de segurança única: remove o que o paciente não pode comer e repõe a proteína removida por uma opção permitida. */
+    private List<Alimento> aplicarRestricoes(List<Alimento> itens, Perfil p) {
+        List<Alimento> ok = itens.stream().filter(p::permite).collect(Collectors.toCollection(ArrayList::new));
+        long proteinasRemovidas = itens.stream()
+            .filter(a -> !p.permite(a) && a.getProteina() != null && a.getCalorias() != null
+                      && a.getProteina() * 4 >= a.getCalorias() * 0.25)
+            .count();
+        if (proteinasRemovidas == 0) return ok;
+
+        List<Alimento> reposicao = new ArrayList<>(List.of(
+            alimento("Tofu grelhado (120g)",          96, 10,  2, 6),
+            alimento("Grão-de-bico temperado (80g)", 131,  7, 22, 2),
+            alimento("Lentilha cozida (100g)",       116,  9, 20, 0),
+            alimento("Frango grelhado (120g)",       200, 37,  0, 4, false, false, true, true),
+            alimento("Peixe grelhado (120g)",        144, 28,  0, 3, false, false, true, false),
+            alimento("Ovo cozido (2 unidades)",      140, 12,  1, 10)
+        )).stream().filter(p::permite)
+         .filter(r -> ok.stream().noneMatch(o -> o.getNome().equals(r.getNome())))
+         .collect(Collectors.toCollection(ArrayList::new));
+        Collections.shuffle(reposicao, random);
+        ok.addAll(reposicao.stream().limit(proteinasRemovidas).toList());
+        return ok;
     }
 
     // â”€â”€ CAFÃ‰ DA MANHÃƒ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // Estrutura: proteÃ­na + carboidrato + fruta + bebida
-    // Regras: sem carbo pesado para diabÃ©ticos, sem lactose se restrito
+    // Estrutura: proteína + carboidrato + fruta + bebida
+    // Regras: sem carbo pesado para diabéticos, sem lactose se restrito
 
     private List<Alimento> montarCafe(Perfil p) {
         List<Alimento> itens = new ArrayList<>();
@@ -185,32 +249,32 @@ public class PlanoAlimentarService {
                 alimento("Omelete simples (2 ovos)",       150, 13, 1,  11)
             ), p)));
         } else {
-            // proteÃ­na vegana para cafÃ©
+            // proteína vegana para café
             itens.add(escolher(List.of(
                 alimento("Pasta de amendoim (1 col. sopa)", 95,  4, 3,  8),
                 alimento("Tofu firme (80g)",                64,  7, 1,  4),
-                alimento("GrÃ£o-de-bico cozido (50g)",       82,  4, 14, 1)
+                alimento("Grão-de-bico cozido (50g)",       82,  4, 14, 1)
             )));
         }
 
         // 2. CARBOIDRATO DO CAFÃ‰
-        // diabÃ©ticos: sem pÃ£o branco, preferir aveia (baixo Ã­ndice glicÃªmico)
-        // emagrecimento: porÃ§Ã£o menor
+        // diabéticos: sem pão branco, preferir aveia (baixo índice glicêmico)
+        // emagrecimento: porção menor
         if (!p.diabetes) {
             List<Alimento> carbos = filtrar(List.of(
-                alimento("PÃ£o integral (2 fatias)",  160, 6, 28, 2, false, true),
+                alimento("Pão integral (2 fatias)",  160, 6, 28, 2, false, true),
                 alimento("Tapioca (1 unidade)",      110, 1, 27, 0, false, false),
                 alimento("Aveia (4 col. sopa)",      150, 5, 27, 3, false, true),
-                alimento("Cuscuz (1 fatia mÃ©dia)",   120, 3, 25, 1, false, false)
+                alimento("Cuscuz (1 fatia média)",   120, 3, 25, 1, false, false)
             ), p);
             if (!carbos.isEmpty()) itens.add(p.emagrecimento
-                ? alimento("Aveia (2 col. sopa)", 75, 3, 14, 2) // porÃ§Ã£o menor
+                ? alimento("Aveia (2 col. sopa)", 75, 3, 14, 2) // porção menor
                 : escolher(carbos));
         } else {
-            // diabÃ©tico: aveia com baixo IG, sem tapioca/pÃ£o branco
+            // diabético: aveia com baixo IG, sem tapioca/pão branco
             List<Alimento> carbosDiabetes = filtrar(List.of(
                 alimento("Aveia (4 col. sopa)",          150, 5, 27, 3, false, true),
-                alimento("PÃ£o integral (1 fatia)",        80, 3, 14, 1, false, true)
+                alimento("Pão integral (1 fatia)",        80, 3, 14, 1, false, true)
             ), p);
             if (!carbosDiabetes.isEmpty()) itens.add(escolher(carbosDiabetes));
         }
@@ -218,42 +282,42 @@ public class PlanoAlimentarService {
         // 3. FRUTA â€” diabÃ©ticos evitam frutas de alto IG (banana, mamÃ£o)
         if (!p.diabetes) {
             itens.add(escolher(List.of(
-                alimento("MamÃ£o (1 fatia mÃ©dia)",  45, 0, 11, 0),
+                alimento("Mamão (1 fatia média)",  45, 0, 11, 0),
                 alimento("Banana (1 unidade)",     90, 1, 23, 0),
-                alimento("MaÃ§Ã£ (1 unidade)",       80, 0, 21, 0),
-                alimento("Morango (1 xÃ­cara)",     50, 1, 12, 0)
+                alimento("Maçã (1 unidade)",       80, 0, 21, 0),
+                alimento("Morango (1 xícara)",     50, 1, 12, 0)
             )));
         } else {
-            // frutas de baixo IG para diabÃ©ticos
+            // frutas de baixo IG para diabéticos
             itens.add(escolher(List.of(
-                alimento("MaÃ§Ã£ (1 unidade)",       80, 0, 21, 0),
+                alimento("Maçã (1 unidade)",       80, 0, 21, 0),
                 alimento("Pera (1 unidade)",        60, 0, 15, 0),
-                alimento("Morango (1 xÃ­cara)",      50, 1, 12, 0)
+                alimento("Morango (1 xícara)",      50, 1, 12, 0)
             )));
         }
 
         // 4. BEBIDA â€” hipertensos: sem cafÃ© (cafeÃ­na eleva pressÃ£o)
         if (p.hipertensao) {
             itens.add(p.semLactose
-                ? alimento("ChÃ¡ de ervas (200ml)",          0, 0, 0, 0)
+                ? alimento("Chá de ervas (200ml)",          0, 0, 0, 0)
                 : alimento("Leite desnatado (200ml)",       70, 7, 10, 0, true, false));
         } else {
             itens.add(p.semLactose
-                ? alimento("CafÃ© preto sem aÃ§Ãºcar (200ml)", 5, 0, 1, 0)
-                : alimento("CafÃ© com leite desnatado (200ml)", 60, 4, 6, 1, true, false));
+                ? alimento("Café preto sem açúcar (200ml)", 5, 0, 1, 0)
+                : alimento("Café com leite desnatado (200ml)", 60, 4, 6, 1, true, false));
         }
 
         return itens;
     }
 
     // â”€â”€ ALMOÃ‡O â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // Estrutura: proteÃ­na + carboidrato + leguminosa + salada + gordura boa
+    // Estrutura: proteína + carboidrato + leguminosa + salada + gordura boa
     // Regras: hipertensos sem sal extra, colesterol sem carne vermelha
 
     private List<Alimento> montarAlmoco(Perfil p) {
         List<Alimento> itens = new ArrayList<>();
 
-        // 1. PROTEÃNA PRINCIPAL
+        // 1. PROTEÍNA PRINCIPAL
         if (!p.vegetariano) {
             List<Alimento> proteinas = new ArrayList<>();
             // colesterol alto: sem carne vermelha
@@ -267,9 +331,9 @@ public class PlanoAlimentarService {
         } else {
             itens.add(escolher(List.of(
                 alimento("Tofu grelhado (150g)",   120, 13, 3,  7),
-                alimento("GrÃ£o-de-bico (100g)",    164,  9, 27, 3),
+                alimento("Grão-de-bico (100g)",    164,  9, 27, 3),
                 alimento("Lentilha cozida (100g)", 116,  9, 20, 0),
-                alimento("FeijÃ£o preto (1 concha)",  80,  5, 15, 0)
+                alimento("Feijão preto (1 concha)",  80,  5, 15, 0)
             )));
         }
 
@@ -280,35 +344,35 @@ public class PlanoAlimentarService {
                     alimento("Arroz integral (4 col. sopa)", 168, 4, 36, 1),
                     alimento("Arroz branco (4 col. sopa)",   160, 3, 35, 0),
                     alimento("Batata-doce cozida (130g)",    112, 2, 26, 0),
-                    alimento("MacarrÃ£o integral (100g)",     160, 6, 31, 1, false, true)
+                    alimento("Macarrão integral (100g)",     160, 6, 31, 1, false, true)
                 ), p);
                 if (!carbos.isEmpty()) itens.add(escolher(carbos));
             } else {
-                // diabÃ©tico: sÃ³ opÃ§Ãµes de baixo IG
+                // diabético: só opções de baixo IG
                 itens.add(escolher(List.of(
                     alimento("Arroz integral (3 col. sopa)", 126, 3, 27, 1),
                     alimento("Batata-doce cozida (100g)",     86, 2, 20, 0)
                 )));
             }
         } else {
-            // emagrecimento: porÃ§Ã£o reduzida de carboidrato
+            // emagrecimento: porção reduzida de carboidrato
             itens.add(alimento("Batata-doce cozida (80g)", 69, 1, 16, 0));
         }
 
         // 3. LEGUMINOSA â€” fonte de fibra e proteÃ­na vegetal
         if (!p.vegetariano) {
             itens.add(escolher(List.of(
-                alimento("FeijÃ£o carioca (1 concha)", 76, 5, 14, 0),
-                alimento("FeijÃ£o preto (1 concha)",   80, 5, 15, 0),
+                alimento("Feijão carioca (1 concha)", 76, 5, 14, 0),
+                alimento("Feijão preto (1 concha)",   80, 5, 15, 0),
                 alimento("Lentilha (1 concha)",       90, 7, 16, 0)
             )));
         }
 
         // 4. SALADA â€” sempre presente, boa para todos os perfis
         itens.add(escolher(List.of(
-            alimento("Salada verde mista (Ã  vontade)",    20, 2, 3, 0),
+            alimento("Salada verde mista (à vontade)",    20, 2, 3, 0),
             alimento("Tomate + alface + pepino",          25, 1, 5, 0),
-            alimento("RÃºcula com tomate cereja",          20, 2, 3, 0)
+            alimento("Rúcula com tomate cereja",          20, 2, 3, 0)
         )));
 
         // 5. GORDURA BOA â€” colesterol: azeite em vez de manteiga
@@ -318,14 +382,14 @@ public class PlanoAlimentarService {
     }
 
     // â”€â”€ LANCHE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // Estrutura: proteÃ­na leve + fruta ou carboidrato simples
-    // Regras: NUNCA refeiÃ§Ã£o pesada, sem aÃ§Ãºcar para diabÃ©ticos
+    // Estrutura: proteína leve + fruta ou carboidrato simples
+    // Regras: NUNCA refeição pesada, sem açúcar para diabéticos
 
     private List<Alimento> montarLanche(Perfil p) {
         List<Alimento> itens = new ArrayList<>();
 
         if (p.hipertrofia) {
-            // lanche reforÃ§ado: proteÃ­na + carboidrato + gordura boa
+            // lanche reforçado: proteína + carboidrato + gordura boa
             if (!p.semLactose) {
                 itens.add(alimento("Iogurte grego natural (170g)", 130, 12, 6, 6, true, false));
             } else {
@@ -338,11 +402,11 @@ public class PlanoAlimentarService {
                     alimento("Manga (1 fatia)",     65, 1, 17, 0)
                 )));
             } else {
-                itens.add(alimento("MaÃ§Ã£ (1 unidade)", 80, 0, 21, 0));
+                itens.add(alimento("Maçã (1 unidade)", 80, 0, 21, 0));
             }
-            // carboidrato extra para hipertrofia (sem glÃºten se necessÃ¡rio)
+            // carboidrato extra para hipertrofia (sem glúten se necessário)
             if (!p.semGluten) {
-                itens.add(alimento("PÃ£o integral (1 fatia)", 80, 3, 14, 1, false, true));
+                itens.add(alimento("Pão integral (1 fatia)", 80, 3, 14, 1, false, true));
             } else {
                 itens.add(alimento("Batata-doce cozida (80g)", 69, 1, 16, 0));
             }
@@ -351,19 +415,19 @@ public class PlanoAlimentarService {
             // lanche leve: fruta + gordura boa (sem carboidrato extra)
             if (!p.diabetes) {
                 itens.add(escolher(List.of(
-                    alimento("MaÃ§Ã£ (1 unidade)",     80, 0, 21, 0),
+                    alimento("Maçã (1 unidade)",     80, 0, 21, 0),
                     alimento("Pera (1 unidade)",      60, 0, 15, 0),
                     alimento("Cenoura baby (100g)",   41, 1,  9, 0),
                     alimento("Pepino fatiado (100g)", 16, 1,  4, 0)
                 )));
             } else {
-                // diabÃ©tico emagrecendo: fruta de baixo IG + proteÃ­na
-                itens.add(alimento("MaÃ§Ã£ (1 unidade)", 80, 0, 21, 0));
+                // diabético emagrecendo: fruta de baixo IG + proteína
+                itens.add(alimento("Maçã (1 unidade)", 80, 0, 21, 0));
             }
-            itens.add(alimento("Castanha-do-parÃ¡ (2 unidades)", 60, 1, 1, 6));
+            itens.add(alimento("Castanha-do-pará (2 unidades)", 60, 1, 1, 6));
 
         } else {
-            // lanche padrÃ£o: proteÃ­na leve + fruta
+            // lanche padrão: proteína leve + fruta
             if (!p.semLactose) {
                 itens.add(alimento("Iogurte natural desnatado (170g)", 100, 6, 8, 3, true, false));
             } else if (!p.vegano) {
@@ -375,11 +439,11 @@ public class PlanoAlimentarService {
             if (!p.diabetes) {
                 itens.add(escolher(List.of(
                     alimento("Banana (1 unidade)", 90, 1, 23, 0),
-                    alimento("MaÃ§Ã£ (1 unidade)",   80, 0, 21, 0),
+                    alimento("Maçã (1 unidade)",   80, 0, 21, 0),
                     alimento("Pera (1 unidade)",    60, 0, 15, 0)
                 )));
             } else {
-                itens.add(alimento("MaÃ§Ã£ (1 unidade)", 80, 0, 21, 0));
+                itens.add(alimento("Maçã (1 unidade)", 80, 0, 21, 0));
             }
         }
 
@@ -387,8 +451,8 @@ public class PlanoAlimentarService {
     }
 
     // â”€â”€ JANTAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // Estrutura: proteÃ­na leve + legume + carboidrato moderado (sem para emagrecimento)
-    // Regras: mais leve que almoÃ§o, sem frituras, colesterol sem carne vermelha
+    // Estrutura: proteína leve + legume + carboidrato moderado (sem para emagrecimento)
+    // Regras: mais leve que almoço, sem frituras, colesterol sem carne vermelha
 
     private List<Alimento> montarJantar(Perfil p) {
         List<Alimento> itens = new ArrayList<>();
@@ -406,13 +470,13 @@ public class PlanoAlimentarService {
             itens.add(escolher(List.of(
                 alimento("Tofu grelhado (120g)",          96, 10, 2, 6),
                 alimento("Omelete de legumes (2 ovos)",  140, 12, 4, 9, false, false, true, false),
-                alimento("GrÃ£o-de-bico temperado (80g)", 131,  7, 22, 2)
+                alimento("Grão-de-bico temperado (80g)", 131,  7, 22, 2)
             )));
         }
 
         // 2. LEGUMES â€” sempre presentes no jantar
         itens.add(escolher(List.of(
-            alimento("BrÃ³colis no vapor (90g)",    31, 3, 6, 0),
+            alimento("Brócolis no vapor (90g)",    31, 3, 6, 0),
             alimento("Abobrinha refogada (100g)",  17, 1, 3, 0),
             alimento("Cenoura cozida (80g)",       33, 1, 8, 0),
             alimento("Espinafre refogado (80g)",   18, 2, 3, 0),
@@ -429,13 +493,13 @@ public class PlanoAlimentarService {
                     alimento("Inhame cozido (100g)",          97, 2, 22, 0)
                 )));
             } else {
-                // diabÃ©tico: sÃ³ batata-doce (baixo IG)
+                // diabético: só batata-doce (baixo IG)
                 itens.add(alimento("Batata-doce cozida (80g)", 69, 1, 16, 0));
             }
         }
 
         // 4. GORDURA BOA â€” sempre presente
-        itens.add(alimento("Azeite de oliva (1 col. chÃ¡)", 44, 0, 0, 5));
+        itens.add(alimento("Azeite de oliva (1 col. chá)", 44, 0, 0, 5));
 
         return itens;
     }
@@ -443,23 +507,27 @@ public class PlanoAlimentarService {
     // â”€â”€ HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private List<Alimento> filtrar(List<Alimento> lista, Perfil p) {
-        return lista.stream()
-            .filter(a -> !(p.semLactose  && a.isTemLactose()))
-            .filter(a -> !(p.semGluten   && a.isTemGluten()))
-            .filter(a -> !(p.vegano      && a.isTemAnimal()))
-            .filter(a -> !(p.vegetariano && a.isTemCarne()))
-            .collect(Collectors.toList());
+        return lista.stream().filter(p::permite).collect(Collectors.toList());
     }
 
     private Alimento escolher(List<Alimento> lista) {
-        if (lista.isEmpty()) return alimento("Fruta da estaÃ§Ã£o", 60, 1, 15, 0);
+        // prefere opções que o admin não desativou; se todas foram desativadas, sobra o filtro final (permite)
+        List<Alimento> disponiveis = lista.stream().filter(a -> !a.isIndisponivel()).toList();
+        if (!disponiveis.isEmpty()) lista = disponiveis;
+        if (lista.isEmpty()) return alimento("Fruta da estação", 60, 1, 15, 0);
         return lista.get(random.nextInt(lista.size()));
     }
 
     // factories de Alimento
 
+    /** Valores do catálogo (editados pelo admin) prevalecem sobre os do código; sem entrada, usa os do código. */
     private Alimento alimento(String nome, double cal, double prot, double carbo, double gord) {
         Alimento a = new Alimento();
+        var cat = catalogo.get() == null ? null : catalogo.get().get(nome.toLowerCase());
+        if (cat != null) {
+            cal = cat.getCalorias(); prot = cat.getProteina(); carbo = cat.getCarboidrato(); gord = cat.getGordura();
+            a.setIndisponivel(!cat.isAtivo());
+        }
         a.setNome(nome); a.setCalorias(cal); a.setProteina(prot);
         a.setCarboidrato(carbo); a.setGordura(gord);
         return a;
