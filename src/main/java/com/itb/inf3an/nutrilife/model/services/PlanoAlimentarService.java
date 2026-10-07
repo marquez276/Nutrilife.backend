@@ -1,6 +1,7 @@
 package com.itb.inf3an.nutrilife.model.services;
 
 import com.itb.inf3an.nutrilife.model.entity.*;
+import com.itb.inf3an.nutrilife.model.enums.OrigemPlano;
 import com.itb.inf3an.nutrilife.model.repository.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +66,7 @@ public class PlanoAlimentarService {
         plano.setCliente(cliente);
         plano.setDataInicio(LocalDate.now());
         plano.setAnamneseHash(hashAtual);
+        plano.setOrigem(OrigemPlano.AUTOMATICO);
         plano = planoRepository.save(plano);
 
         Perfil perfil = new Perfil(anamnese);

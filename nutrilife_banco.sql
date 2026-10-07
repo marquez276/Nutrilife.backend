@@ -90,14 +90,16 @@ CREATE TABLE Plano_Alimentar (
     data_inicio      DATE          NOT NULL,
     data_final       DATE          NULL,
     anamnese_hash    VARCHAR(255)  NULL,
-    cod_status       BIT           NOT NULL DEFAULT 0
+    cod_status       BIT           NOT NULL DEFAULT 0,
+    origem           VARCHAR(20)   NOT NULL DEFAULT 'AUTOMATICO'
 );
 GO
 
 CREATE TABLE Refeicao (
     id       BIGINT IDENTITY(1,1) PRIMARY KEY,
     plano_id BIGINT       NULL REFERENCES Plano_Alimentar(id),
-    nome     VARCHAR(255) NULL
+    nome     VARCHAR(255) NULL,
+    horario  TIME         NULL
 );
 GO
 
@@ -112,8 +114,49 @@ CREATE TABLE Alimento (
     gordura     FLOAT        NULL,
     customizado BIT          NOT NULL DEFAULT 0,
     categoria   VARCHAR(50)  NULL,
-    ativo       BIT          NOT NULL DEFAULT 1
+    ativo       BIT          NOT NULL DEFAULT 1,
+    quantidade  FLOAT        NULL,
+    unidade     VARCHAR(20)  NULL
 );
+GO
+
+CREATE TABLE Vinculo (
+    id               BIGINT        IDENTITY(1,1) PRIMARY KEY,
+    id_cliente       BIGINT        NULL REFERENCES Usuario(id),
+    id_nutricionista BIGINT        NOT NULL REFERENCES Usuario(id),
+    origem           VARCHAR(20)   NOT NULL,
+    status           VARCHAR(20)   NOT NULL,
+    codigo_convite   VARCHAR(20)   NULL,
+    data_criacao     DATETIME2     NOT NULL DEFAULT SYSDATETIME(),
+    data_resposta    DATETIME2     NULL
+);
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+CREATE UNIQUE INDEX UQ_Vinculo_Codigo ON Vinculo(codigo_convite) WHERE codigo_convite IS NOT NULL;
+CREATE INDEX IX_Vinculo_Cliente ON Vinculo(id_cliente);
+CREATE INDEX IX_Vinculo_Nutricionista ON Vinculo(id_nutricionista);
+GO
+
+CREATE TABLE Paciente_Externo (
+    id               BIGINT        IDENTITY(1,1) PRIMARY KEY,
+    id_nutricionista BIGINT        NOT NULL REFERENCES Usuario(id),
+    nome             VARCHAR(100)  NOT NULL,
+    objetivo         VARCHAR(50)   NULL,
+    observacoes      VARCHAR(1000) NULL,
+    data_cadastro    DATETIME2     NOT NULL DEFAULT SYSDATETIME()
+);
+GO
+
+CREATE TABLE Observacao_Clinica (
+    id               BIGINT        IDENTITY(1,1) PRIMARY KEY,
+    cliente_id       BIGINT        NOT NULL REFERENCES Usuario(id),
+    nutricionista_id BIGINT        NOT NULL REFERENCES Usuario(id),
+    texto            VARCHAR(2000) NOT NULL,
+    data_hora        DATETIME2     NOT NULL DEFAULT SYSDATETIME()
+);
+GO
+CREATE INDEX IX_ObservacaoClinica_Cliente_Nutricionista ON Observacao_Clinica(cliente_id, nutricionista_id);
 GO
 
 CREATE TABLE Registro_Refeicao (
@@ -187,7 +230,7 @@ GO
 
 -- Admin padrão (senha: admin123)
 INSERT INTO Usuario (tipo_usuario, nome_completo, email, senha, cod_status, aprovado, principal)
-VALUES ('ADMIN', 'Administrador', 'admin@nutrilife.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL523Cp2', 1, 1, 1);
+VALUES ('ADMIN', 'Administrador', 'admin@nutrilife.com', '23122008', 1, 1, 1);
 GO
 
 SELECT * FROM Usuario;

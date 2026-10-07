@@ -1,6 +1,7 @@
 package com.itb.inf3an.nutrilife.model.entity;
 
 import com.fasterxml.jackson.annotation.JsonManagedReference;
+import com.itb.inf3an.nutrilife.model.enums.OrigemPlano;
 import jakarta.persistence.*;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -32,6 +33,10 @@ public class PlanoAlimentar {
 
     private boolean codStatus;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20, nullable = false)
+    private OrigemPlano origem = OrigemPlano.AUTOMATICO;
+
     @ManyToOne(cascade = CascadeType.MERGE, fetch = FetchType.EAGER)
     @JoinColumn(name = "id_cliente", referencedColumnName = "id", nullable = false)
     private Cliente cliente;
@@ -40,7 +45,7 @@ public class PlanoAlimentar {
     @JoinColumn(name = "id_nutricionista", referencedColumnName = "id", nullable = true)
     private Nutricionista nutricionista;
 
-    @OneToMany(mappedBy = "plano", cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+    @OneToMany(mappedBy = "plano", cascade = CascadeType.ALL, fetch = FetchType.EAGER, orphanRemoval = true)
     @JsonManagedReference("plano-refeicoes")
     private List<Refeicao> refeicoes;
 }

@@ -41,6 +41,13 @@ public class Alimento {
     @Column(name = "ativo", nullable = false)
     private boolean ativo = true;
 
+    // Usados apenas pelo Plano Personalizado (nutricionista define por item da refeição); cada linha de
+    // Alimento já é uma cópia por plano (nunca compartilhada entre planos), então é seguro guardar aqui.
+    private Double quantidade;
+
+    @Column(length = 20)
+    private String unidade;
+
     // só durante a geração do plano: alimento do catálogo desativado
     @Transient @JsonIgnore private boolean indisponivel;
 

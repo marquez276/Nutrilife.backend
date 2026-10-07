@@ -5,6 +5,7 @@ import com.itb.inf3an.nutrilife.model.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import com.itb.inf3an.nutrilife.security.config.Authz;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -30,10 +31,10 @@ public class RegistroController {
     private PesagemRepository pesagemRepo;
 
     @Autowired
-    private ConsultaRepository consultaRepo;
+    private UsuarioRepository usuarioRepo;
 
     @Autowired
-    private UsuarioRepository usuarioRepo;
+    private ObservacaoClinicaRepository observacaoRepo;
 
     @Autowired
     private Authz authz;
@@ -119,7 +120,7 @@ public class RegistroController {
         }).orElse(ResponseEntity.notFound().build());
     }
 
-    @PreAuthorize("@authz.self(#clienteId)")
+    @PreAuthorize("@authz.self(#clienteId) or @authz.vinculado(#clienteId)")
     @GetMapping("/clientes/{clienteId}/progresso")
     public ResponseEntity<?> getProgresso(@PathVariable Long clienteId) {
         List<Pesagem> historico = pesagemRepo.findByClienteIdOrderByDataAsc(clienteId);
@@ -201,7 +202,8 @@ public class RegistroController {
 
     // ATUALIZAR ANAMNESE
 
-    @PreAuthorize("@authz.self(#clienteId)")
+    // Também usada pelo nutricionista vinculado para consultar a ficha ao montar o Plano Personalizado.
+    @PreAuthorize("@authz.self(#clienteId) or @authz.vinculado(#clienteId)")
     @GetMapping("/anamnese/cliente/{clienteId}")
     public ResponseEntity<?> buscarAnamnese(@PathVariable Long clienteId) {
         Anamnese a = anamneseRepo.findByClienteId(clienteId);
@@ -293,63 +295,36 @@ public class RegistroController {
     // Usa o próprio campo observations da Consulta para guardar notas por paciente.
     // Endpoint dedicado: GET/POST /prontuario/{nutricionistaId}/{pacienteNome}
 
-    @PreAuthorize("@authz.self(#nutricionistaId)")
-    @GetMapping("/prontuario/{nutricionistaId}/{pacienteNome}")
-    public ResponseEntity<?> buscarProntuario(
-            @PathVariable Long nutricionistaId,
-            @PathVariable String pacienteNome) {
-        // Busca a consulta mais recente deste nutricionista para este paciente que tenha observações
-        return consultaRepo.findByNutricionistaId(nutricionistaId).stream()
-            .filter(c -> pacienteNome.equalsIgnoreCase(c.getPacienteNome()) && c.getObservations() != null)
-            .max(java.util.Comparator.comparing(c -> c.getDataConsulta() != null ? c.getDataConsulta() : java.time.LocalDate.MIN))
-            .map(c -> ResponseEntity.ok(Map.of(
-                "id", c.getId(),
-                "observations", c.getObservations() != null ? c.getObservations() : ""
-            )))
-            .orElse(ResponseEntity.ok(Map.of("id", -1, "observations", "")));
+    @PreAuthorize("@authz.vinculado(#clienteId)")
+    @GetMapping("/prontuario/{clienteId}")
+    public List<ObservacaoClinica> listarObservacoes(@PathVariable Long clienteId) {
+        Long nutricionistaId = usuarioAutenticado().getId();
+        return observacaoRepo.findByClienteIdAndNutricionistaIdOrderByDataHoraDesc(clienteId, nutricionistaId);
     }
 
     @PostMapping("/prontuario")
-    public ResponseEntity<?> salvarProntuario(@RequestBody Map<String, Object> body) {
-        // Cria ou atualiza uma consulta de prontuário (sem data/hora, só observações)
-        authz.check(body.get("nutricionistaId") != null ? Long.parseLong(body.get("nutricionistaId").toString()) : null);
-        Long consultaId = body.containsKey("consultaId") && body.get("consultaId") != null
-            ? Long.parseLong(body.get("consultaId").toString()) : null;
+    public ResponseEntity<?> salvarObservacao(@RequestBody Map<String, Object> body) {
+        Long clienteId = body.get("clienteId") != null ? Long.parseLong(body.get("clienteId").toString()) : null;
+        String texto = body.get("texto") != null ? body.get("texto").toString().trim() : "";
+        if (clienteId == null) return ResponseEntity.badRequest().body(Map.of("message", "Paciente é obrigatório."));
+        if (texto.isEmpty()) return ResponseEntity.badRequest().body(Map.of("message", "A observação não pode estar vazia."));
+        authz.checkVinculado(clienteId);
 
-        Consulta c = consultaId != null && consultaId > 0
-            ? consultaRepo.findById(consultaId).filter(x -> x.getNutricionista() != null && authz.self(x.getNutricionista().getId())).orElse(new Consulta())
-            : new Consulta();
+        Cliente cliente = new Cliente();
+        cliente.setId(clienteId);
+        Nutricionista nutri = new Nutricionista();
+        nutri.setId(usuarioAutenticado().getId());
 
-        if (c.getDataConsulta() == null) c.setDataConsulta(java.time.LocalDate.now());
-        if (c.getHorario() == null) c.setHorario(java.time.LocalTime.now());
-        c.setObservations(body.get("observations") != null ? body.get("observations").toString() : null);
-        if (body.containsKey("pacienteNome"))
-            c.setPacienteNome(body.get("pacienteNome").toString());
-        if (body.containsKey("nutricionistaId") && body.get("nutricionistaId") != null) {
-            Nutricionista n = new Nutricionista();
-            n.setId(Long.parseLong(body.get("nutricionistaId").toString()));
-            c.setNutricionista(n);
-        }
-        c.setCodStatus(true);
-        Consulta salva = consultaRepo.save(c);
-        return ResponseEntity.ok(Map.of("id", salva.getId(), "observations", salva.getObservations() != null ? salva.getObservations() : ""));
+        ObservacaoClinica o = new ObservacaoClinica();
+        o.setCliente(cliente);
+        o.setNutricionista(nutri);
+        o.setTexto(texto);
+        o.setDataHora(LocalDateTime.now());
+        return ResponseEntity.ok(observacaoRepo.save(o));
     }
 
-    // PESAGENS DO PACIENTE (para o nutricionista ver evolução)
-
-    @PostMapping("/registros/pesagens/nutricionista")
-    public ResponseEntity<?> salvarPesagemPaciente(@RequestBody Map<String, Object> body) {
-        Pesagem p = new Pesagem();
-        if (body.containsKey("peso")) p.setPeso(Double.parseDouble(body.get("peso").toString()));
-        if (body.containsKey("data") && body.get("data") != null)
-            p.setData(java.time.LocalDate.parse(body.get("data").toString()));
-        else p.setData(java.time.LocalDate.now());
-        if (body.containsKey("clienteId") && body.get("clienteId") != null) {
-            Cliente cli = new Cliente();
-            cli.setId(Long.parseLong(body.get("clienteId").toString()));
-            p.setCliente(cli);
-        }
-        return ResponseEntity.ok(pesagemRepo.save(p));
+    private Usuario usuarioAutenticado() {
+        return (Usuario) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
     }
 
     // METAS SALVAS (leitura sem recalcular)

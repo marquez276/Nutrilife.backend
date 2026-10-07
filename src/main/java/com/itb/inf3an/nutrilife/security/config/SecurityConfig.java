@@ -62,7 +62,7 @@ public class SecurityConfig {
                                 .requestMatchers(HttpMethod.GET, "/admin/verificar-crn").permitAll()
                                 .requestMatchers(HttpMethod.GET, "/admin/alimentos").authenticated()
                                 .requestMatchers("/admin/**").hasRole("ADMIN")
-                                .requestMatchers("/prontuario/**", "/registros/pesagens/nutricionista").hasAnyRole("NUTRICIONISTA", "ADMIN")
+                                .requestMatchers("/prontuario/**").hasAnyRole("NUTRICIONISTA", "ADMIN")
                                 .anyRequest().authenticated()
                 )
                 .exceptionHandling(exception -> exception
