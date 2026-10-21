@@ -16,7 +16,6 @@ import com.itb.inf3an.nutrilife.security.config.Authz;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.core.context.SecurityContextHolder;
 import com.itb.inf3an.nutrilife.model.services.Auditoria;
-import com.itb.inf3an.nutrilife.model.services.CatalogoSeed;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -112,8 +111,9 @@ public class AdminController {
 
     @GetMapping("/admin/crescimento")
     public ResponseEntity<?> crescimento() {
-        // Total acumulado de pacientes + nutricionistas ao fim de cada um dos últimos 6 meses
-        List<Usuario> todos = usuarioRepo.findAll().stream().filter(u -> u.getTipoUsuario() != TipoUsuario.ADMIN).toList();
+        // Total acumulado de pacientes e nutricionistas (separados) ao fim de cada um dos últimos 6 meses
+        List<Usuario> pacientes = usuarioRepo.findByTipoUsuario(TipoUsuario.CLIENTE);
+        List<Usuario> nutris = usuarioRepo.findByTipoUsuario(TipoUsuario.NUTRICIONISTA);
         YearMonth now = YearMonth.now();
         List<Map<String, Object>> data = new ArrayList<>();
         for (int i = 5; i >= 0; i--) {
@@ -121,7 +121,8 @@ public class AdminController {
             LocalDateTime fim = ym.plusMonths(1).atDay(1).atStartOfDay();
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("month", ym.getMonth().getDisplayName(java.time.format.TextStyle.SHORT, new java.util.Locale("pt", "BR")));
-            entry.put("users", todos.stream().filter(u -> u.getDataCadastro() != null && u.getDataCadastro().isBefore(fim)).count());
+            entry.put("pacientes", pacientes.stream().filter(u -> u.getDataCadastro() != null && u.getDataCadastro().isBefore(fim)).count());
+            entry.put("nutricionistas", nutris.stream().filter(u -> u.getDataCadastro() != null && u.getDataCadastro().isBefore(fim)).count());
             data.add(entry);
         }
         return ResponseEntity.ok(data);
@@ -417,9 +418,6 @@ public class AdminController {
     @DeleteMapping("/admin/alimentos/{id}")
     public ResponseEntity<?> removerAlimento(@PathVariable Long id) {
         return alimentoRepo.findById(id).filter(a -> a.getRefeicao() == null && !a.isCustomizado()).map(a -> {
-            // se o gerador de planos tem regra para o alimento, apagar não o tira dos planos: só desativar
-            if (CatalogoSeed.CATEGORIA_PLANO.equals(a.getCategoria()))
-                throw new BadRequest("Este alimento é usado na geração dos planos. Desative-o em vez de removê-lo.");
             alimentoRepo.delete(a);
             auditoria.registrar("Removeu o alimento " + a.getNome());
             return ResponseEntity.ok((Object) Map.of("message", "Removido."));
