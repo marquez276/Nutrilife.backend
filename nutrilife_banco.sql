@@ -228,9 +228,7 @@ GO
 CREATE INDEX ix_tokens_token ON tokens(token);
 GO
 
--- Admin padrão (senha: admin123)
-INSERT INTO Usuario (tipo_usuario, nome_completo, email, senha, cod_status, aprovado, principal)
-VALUES ('ADMIN', 'Administrador', 'admin@nutrilife.com', '23122008', 1, 1, 1);
-GO
+-- Admin padrão: criado automaticamente pela API no primeiro start (AdminSeed.java),
+-- já com a senha em BCrypt. Não inserir aqui em texto puro.
 
 SELECT * FROM Usuario;

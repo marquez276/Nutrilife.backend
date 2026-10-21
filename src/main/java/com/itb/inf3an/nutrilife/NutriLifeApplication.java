@@ -17,3 +17,4 @@ public class NutriLifeApplication {
 		log.info("NutriLife iniciado com sucesso.");
 	}
 }
+ 
